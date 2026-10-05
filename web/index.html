@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>Sessionary</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23d9a566'/%3E%3Cpath d='M9 11h14M9 16h14M9 21h8' stroke='%231c1b19' stroke-width='2.4' stroke-linecap='round'/%3E%3C/svg%3E" />
+    <script>
+      try {
+        var t = JSON.parse(localStorage.getItem('sessionary:theme') || '"ember"')
+        if (t === 'system') t = matchMedia('(prefers-color-scheme: light)').matches ? 'paper' : 'ember'
+        document.documentElement.dataset.theme = t
+        // set the language before first paint so CJK text starts in the right font
+        var l = JSON.parse(localStorage.getItem('sessionary:lang') || 'null')
+        if (!l) { var n = (navigator.language || 'en').toLowerCase(); l = n.indexOf('ja') === 0 ? 'ja' : /^zh-(hant|tw|hk|mo)/.test(n) ? 'zh-Hant' : n.indexOf('zh') === 0 ? 'zh-Hans' : 'en' }
+        document.documentElement.lang = l
+      } catch (e) {}
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
