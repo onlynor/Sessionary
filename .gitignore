@@ -1,0 +1,39 @@
+# dependencies and build output
+node_modules/
+dist/
+web-dist/
+*.tgz
+*.tsbuildinfo
+.vite/
+coverage/
+
+# generated: rebuild with `pnpm build:design`
+design/playground.html
+
+# local reference material (screenshots contain personal names, paths and session titles)
+assets/
+
+# anything that could hold secrets or real session data
+.env
+.env.*
+!.env.example
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+*.jsonl
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# editor / OS / tool state
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+.claude/
+
+# legacy
+clideck
