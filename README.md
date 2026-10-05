@@ -1,5 +1,7 @@
 # Sessionary
 
+[English](README.md) | [简体中文](README.zh-CN.md) | [繁體中文](README.zh-TW.md) | [日本語](README.ja.md)
+
 A local-first session manager for AI coding agents. Sessionary reads the history that **Claude Code**, **OpenCode** and
 **Pi** already keep on your disk, puts every session from every agent in one searchable list, and lets you pick any of
 them back up — in your own terminal with the agent's real resume command, or with one more prompt from the browser.
