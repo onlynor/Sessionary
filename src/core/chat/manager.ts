@@ -89,6 +89,8 @@ export interface ChatsOptions {
   binFor?: (agent: ChatAgent, machine: string) => string
   /** swap a driver for a test */
   driverFor?: (req: OpenRequest, emit: (e: ChatEvent) => void, spawner: Spawner) => ChatDriver | undefined
+  /** what an agent is started with besides what its protocol needs: its model routing (control/agents.ts) */
+  launchFor?: (agent: ChatAgent, machine: string) => { env: Record<string, string>; args: string[] } | undefined
   hooks?: ChatHooks
 }
 
@@ -145,7 +147,10 @@ export class Chats {
       pending: new Set(), working: false, toolIdx: new Map(), listeners: 0, driver: undefined as unknown as ChatDriver,
     }
     const emit = (e: ChatEvent) => this.record(chat, e)
-    const spawner = this.o.spawnFor(req.machine)
+    const base = this.o.spawnFor(req.machine)
+    const extra = this.o.launchFor?.(req.agent, req.machine)
+    // the routing's arguments go first, so a model picked in the chat itself still has the last word
+    const spawner: Spawner = extra ? (s) => base({ ...s, args: [...extra.args, ...s.args], env: { ...s.env, ...extra.env } }) : base
     const bin = this.o.binFor?.(req.agent, req.machine) ?? (req.machine === 'local' ? localBin(req.agent) : DEFAULT_BIN[req.agent])
     const driver = this.o.driverFor?.(req, emit, spawner) ?? this.makeDriver(req, bin, emit, spawner)
     chat.driver = driver

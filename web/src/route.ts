@@ -12,6 +12,13 @@ import { useEffect, useState } from 'react'
  *   #/m/<machine>/s/<session>[?v=changes]   one session
  *   #/m/<machine>/c/<chat>             a live chat that has no session yet
  *
+ * Model Control is about this computer (its gateway), whichever machine is open:
+ *
+ *   #/models[/<provider>][?add=1]      providers and their models
+ *   #/routing[/<group>]                which agent uses what; routing groups
+ *   #/gateway                          the local endpoint agents are pointed at
+ *   #/usage[?src=history]              what went through it (or what sessions recorded)
+ *
  * `local` is this computer; any other machine id is a node.
  */
 export type MachineTab = 'agents' | 'projects' | 'sessions' | 'terminal' | 'monitor' | 'trash'
@@ -25,6 +32,10 @@ export type Route =
   | { page: 'agent'; machine: string; agent: string; params: URLSearchParams }
   | { page: 'session'; machine: string; id: string; view: 'chat' | 'changes'; q?: string; m?: number }
   | { page: 'chat'; machine: string; id: string }
+  | { page: 'models'; provider?: string; add: boolean }
+  | { page: 'routing'; group?: string }
+  | { page: 'gateway' }
+  | { page: 'usage'; source: 'gateway' | 'history' }
 
 export function parseRoute(hash = location.hash): Route {
   const [path = '', query = ''] = hash.replace(/^#\/?/, '').split('?')
@@ -33,6 +44,10 @@ export function parseRoute(hash = location.hash): Route {
   const [a, b, c, d] = seg
   if (!a) return { page: 'home' }
   if (a === 'machines') return { page: 'machines' }
+  if (a === 'models') return { page: 'models', provider: b, add: params.has('add') }
+  if (a === 'routing') return { page: 'routing', group: b }
+  if (a === 'gateway') return { page: 'gateway' }
+  if (a === 'usage') return { page: 'usage', source: params.get('src') === 'history' ? 'history' : 'gateway' }
   if (a === 'nodes') return { page: 'nodes', add: params.has('add'), edit: params.get('edit') ?? undefined }
   // links from before machines existed
   if (a === 's' && b) return { page: 'session', machine: 'local', id: b, view: params.get('v') === 'changes' ? 'changes' : 'chat', q: params.get('q') ?? undefined, m: params.has('m') ? Number(params.get('m')) : undefined }
@@ -60,6 +75,10 @@ export const href = {
   agent: (machine: string, agent: string, q?: Record<string, string | undefined>) => `#/m/${enc(machine)}/a/${enc(agent)}${qs(q)}`,
   chat: (machine: string, id: string) => `#/m/${enc(machine)}/c/${enc(id)}`,
   session: (machine: string, id: string, q?: Record<string, string | undefined>) => `#/m/${enc(machine)}/s/${enc(id)}${qs(q)}`,
+  models: (provider?: string, q?: { add?: string }) => `#/models${provider ? '/' + enc(provider) : ''}${qs(q)}`,
+  routing: (group?: string) => `#/routing${group ? '/' + enc(group) : ''}`,
+  gateway: '#/gateway',
+  usage: (source?: 'history') => `#/usage${qs({ src: source })}`,
 }
 
 export const go = (h: string) => { location.hash = h.replace(/^#/, '') }

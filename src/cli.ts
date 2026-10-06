@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { serve } from '@hono/node-server'
 import { IndexStore } from './core/index-store.ts'
 import { OverlayStore } from './core/overlay.ts'
+import { ControlStore } from './core/control/store.ts'
 import { createApp } from './server/app.ts'
 
 const args = process.argv.slice(2)
@@ -22,7 +23,7 @@ const webRoot = [path.join(here, '..', 'web-dist'), path.join(here, 'web-dist')]
 const port = Number(opt('port') ?? process.env.PORT ?? 4777)
 const host = opt('host') ?? '127.0.0.1'
 const store = new IndexStore()
-const { app, rescan, startWatching, autoConnect, stopRuns } = createApp(store, webRoot, new OverlayStore())
+const { app, rescan, startWatching, autoConnect, stopRuns } = createApp(store, webRoot, new OverlayStore(), { port, control: new ControlStore() })
 // agents we started must not outlive the server
 for (const sig of ['SIGINT', 'SIGTERM'] as const) process.on(sig, () => { stopRuns(); process.exit(0) })
 

@@ -119,3 +119,30 @@ export type ChatEvent = { seq: number; at: number } & (
   | { t: 'usage'; usage: ChatUsage }
   | { t: 'note'; level: 'info' | 'warn' | 'error'; text: string }
 )
+
+// ---------- Model Control ----------
+export type Protocol = 'anthropic' | 'chat' | 'responses'
+export interface CtlModel { id: string; name?: string; on: boolean; context?: number; manual?: boolean }
+/** a provider as the page sees it: `key` is masked, `hasKey` says whether one is set */
+export interface CtlProvider { id: string; name: string; preset: string; endpoints: Partial<Record<Protocol, string>>; key: string; hasKey: boolean; models: CtlModel[]; on: boolean; at: number; refreshedAt?: number }
+export interface CtlGroup { id: string; name: string; mode: 'order' | 'rotate'; members: string[]; on: boolean; at: number }
+export interface CtlPreset { id: string; name: string; kind: 'vendor' | 'local' | 'gateway' | 'custom'; endpoints: Partial<Record<Protocol, string>>; keyless?: boolean; console?: string; key?: string; hue: number }
+export interface CtlAgent {
+  agent: string; model?: string; provider?: string; endpoint?: string; via: 'default' | 'custom' | 'magpie' | 'sessionary'; file?: string
+  launch: 'env' | 'manual'; conflict?: string; target?: string; protocol: Protocol; reachable?: number; members?: number
+}
+export interface CtlHealth { member: string; answering: number; restingUntil?: number; why?: string; lastOk?: number; lastFail?: number; lastStatus?: number }
+export interface RouteEvent {
+  id: string; at: number; agent: string; target: string; protocol: Protocol
+  phase: 'trying' | 'answering' | 'failed' | 'done' | 'refused'; member?: string; status?: number; ms?: number; why?: string; input?: number; output?: number
+}
+export interface CtlState {
+  providers: CtlProvider[]; groups: CtlGroup[]; agents: CtlAgent[]; presets: CtlPreset[]; health: CtlHealth[]; recent: RouteEvent[]
+  gateway: { base: string; key: string; protocols: Record<Protocol, string> }
+}
+export interface UsageBucket { key: string; calls: number; input: number; output: number; cacheRead: number; failed: number }
+export interface UsageRow { at: number; agent: string; target: string; provider: string; model: string; protocol: Protocol; status: number; ms: number; input: number; output: number; cacheRead: number; error?: string; tries: number }
+export interface UsageSummary {
+  totals: { calls: number; failed: number; input: number; output: number; cacheRead: number; ms: number; rerouted: number }
+  byDay: UsageBucket[]; byModel: UsageBucket[]; byAgent: UsageBucket[]; byTarget: UsageBucket[]; recent: UsageRow[]
+}

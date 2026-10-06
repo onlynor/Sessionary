@@ -29,6 +29,13 @@
   - 開啟工作階段所在的資料夾、在該處開啟終端機，或在編輯器中開啟該資料夾或其中任何檔案。
 - **整理。** 將工作階段釘選在最上方。隱藏工作階段或單則訊息（僅在 Sessionary 中生效的垃圾桶），或從 Agent 的儲存位置刪除工作階段，
   刪除時會保留可還原的備份。
+- **模型控制。** 新增你已有的 API Key（內建 Anthropic、OpenAI、DeepSeek、Kimi、GLM、Qwen、MiniMax、OpenRouter、Ollama 等預設，
+  也可以填任意 OpenAI / Anthropic 相容位址），模型清單直接從供應商讀取。把幾家供應商的模型放進一個*路由群組*，再為每個 Agent
+  選擇它使用的模型或路由群組。本機閘道（`http://127.0.0.1:<連接埠>/gateway`）把 Anthropic Messages、OpenAI Chat、OpenAI Responses
+  請求轉送給說同一協定的成員；某個成員被限流、Key 被拒或當機時，在回覆的第一個位元組送出之前切換到下一個。路由頁即時顯示每次決策；
+  用量頁依天、模型、Agent、路由統計 token，資料來自閘道或 Agent 自己的工作階段檔案。同一台電腦上的 Magpie 閘道可以作為一個供應商加入。
+  Sessionary 不會修改 Agent 的設定檔：選擇只作用於 Sessionary 啟動的工作階段（終端機和對話），透過啟動時的環境變數和參數生效；
+  其他情境可以用「手動設定」給出的設定片段。
 - **桌面級介面。** 可收合、可調整大小的面板，淺色 / 深色 / 石墨主題，寬鬆或緊湊清單，鍵盤導覽，
   觸控與窄視窗版面，並支援 English、简体中文、繁體中文和日本語。
 
@@ -118,7 +125,8 @@ sessionary [--port 4777] [--host 127.0.0.1] [--no-open] [--no-watch]
     `opencode run -s <id>`、`pi --session <file> -p`。預設為唯讀（Claude `--permission-mode plan`、
     OpenCode `--agent plan`、Pi `--tools read,grep,find,ls`）；寫入權限需要針對每則訊息另外開啟。
 - **Sessionary 會寫入的內容**（全部位於 `SESSIONARY_HOME` 之下）：`index.db`（可隨時捨棄、可重建的索引）、`overlay.db`
-  （你的釘選、垃圾桶和刪除記錄）以及 `backup/`。
+  （你的釘選、垃圾桶和刪除記錄）、`backup/`，以及 `control.db`（供應商、API Key、路由群組、閘道 Key 和閘道用量；建立時權限為
+  `0600`，只有你能讀取）。閘道監聽同一個回環連接埠，需要自己的 Key，拒絕非回環 `Origin` 的請求，頁面上只顯示遮蔽後的 Key。
 - **開啟檔案或目錄**僅限於工作階段自己的目錄；恢復和終端機指令會透過你的登入 shell 在該目錄中執行。
 
 ## 架構

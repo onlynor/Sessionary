@@ -41,6 +41,15 @@ read-only; Sessionary's own state lives in a separate folder.
   at once arrive as one, and a closed page is silent.
 - **Organise.** Pin sessions to the top. Hide sessions or individual messages (Sessionary-only Trash), or delete a session
   from the agent's storage with a backup that can be restored.
+- **Model Control.** Add the API keys you have (presets for Anthropic, OpenAI, DeepSeek, Kimi, GLM, Qwen, MiniMax,
+  OpenRouter, Ollama… or any OpenAI-/Anthropic-compatible URL); the model list is read from the provider. Put models from
+  several providers in a *routing group* and choose, per agent, the model or group it runs on. A local gateway
+  (`http://127.0.0.1:<port>/gateway`) relays Anthropic Messages, OpenAI Chat and OpenAI Responses requests to a member
+  that speaks the same protocol, and moves to the next one — before any of the reply is sent — when one is rate limited,
+  refuses its key or is down. The Routing page draws each decision live; Usage shows tokens per day, model, agent and
+  route, from the gateway or from the agents' own session files. A Magpie gateway on the same machine can be added as one
+  provider. Agents' configuration files are never edited: a choice applies to the sessions Sessionary starts (terminal and
+  chat), through their environment and arguments; *Set up by hand* gives a snippet for anything else.
 - **Desktop-class UI.** Collapsible, resizable panes, light/dark/graphite themes, comfortable or compact lists, keyboard
   navigation, touch and narrow-window layouts, and English, 简体中文, 繁體中文 and 日本語.
 
@@ -137,7 +146,11 @@ open them, so the agents' files stay the single source of truth.
     `opencode run -s <id>`, `pi --session <file> -p`. It is read-only by default (Claude `--permission-mode plan`,
     OpenCode `--agent plan`, Pi `--tools read,grep,find,ls`); write access is opted into per message.
 - **What Sessionary writes** (all under `SESSIONARY_HOME`): `index.db` (a disposable, rebuildable index), `overlay.db`
-  (your pins, Trash and deletion records) and `backup/`.
+  (your pins, Trash and deletion records), `backup/`, and `control.db` (providers, API keys, routing groups, the gateway
+  key and gateway usage; created readable by you only, `0600`).
+- **The gateway** answers on the same loopback port, needs its own key (`Bearer` or `x-api-key`), refuses requests carrying
+  a non-loopback `Origin`, and never shows API keys to the page (they are masked; `env:NAME` reads a key from the
+  environment instead of storing it).
 - **Opening things** is confined to the session's own directory; resume and terminal commands run through your login
   shell in that directory.
 
@@ -155,6 +168,8 @@ src/core/project.ts    project = git root of the session's cwd (worktrees fold o
 src/core/context.ts    inspector data: current git state, working-tree diffs, files and tools touched by the session
 src/core/runs.ts       "Continue here": one headless agent run per session, with collision checks
 src/core/launch.ts     terminal / editor / file-manager detection and detached launches
+src/core/control/      Model Control: store (control.db), presets, catalog (provider /models), gateway (routing, failover,
+                       usage), agents (what each agent runs on by itself; launch env/args for a bound agent), api (/api/control)
 src/server/app.ts      Hono API, server-sent events, static web assets
 web/                   Vite + React UI; web/src/styles.css holds the design tokens and themes, web/src/locales.ts the translations
 design/playground/     the static design playground the UI was developed from (`pnpm build:design`)
@@ -174,6 +189,11 @@ design/playground/     the static design playground the UI was developed from (`
 | POST | `/api/scan` | Rescan now |
 | POST | `/api/sessions/:id/{pin,unpin,hide,restore,open,continue,delete-from-disk}` | Session actions (`open` takes `target`: `folder`, `terminal`, `editor`, `file`, `resume`) |
 | POST | `/api/sessions/:id/messages/{hide,restore}` · `/api/runs/:id/stop` · `/api/removed/:id/{restore,purge}` | Messages, runs, backups |
+
+| GET | `/api/control/state` · `/api/control/usage?days=` | Providers (keys masked), groups, agents and their bindings, gateway, member health · usage summary |
+| POST · PUT · DELETE | `/api/control/providers[/:id[/refresh]]` · `/api/control/groups[/:id]` | Providers (model list read on add/refresh) · routing groups |
+| POST | `/api/control/bindings` · `/api/control/gateway/{key,rotate}` · `/api/control/snippet` | Which model an agent starts on · the gateway key · set-up snippet |
+| POST · GET | `/gateway/v1/{messages,chat/completions,responses}` · `/gateway/v1/models` | The gateway, for agents (gateway key, not the page token) |
 
 POST requests need the `x-sessionary-token` header from `GET /api/token`.
 

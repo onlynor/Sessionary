@@ -1,4 +1,4 @@
-import type { ChatSummary, Agent, AgentInstall, Changes, EditBlock, FileDiff, Machine, NodeInfo, NodeInput, OpenTarget, ProjectContext, Run, SearchHit, Session, SessionSummary, Snip, SshHost, Status, Summary, SystemInfo, TermInfo, TreeEntry, Trash } from './types'
+import type { CtlGroup, CtlProvider, CtlState, Protocol, UsageSummary, ChatSummary, Agent, AgentInstall, Changes, EditBlock, FileDiff, Machine, NodeInfo, NodeInput, OpenTarget, ProjectContext, Run, SearchHit, Session, SessionSummary, Snip, SshHost, Status, Summary, SystemInfo, TermInfo, TreeEntry, Trash } from './types'
 
 async function get<T>(url: string, init?: RequestInit): Promise<T> {
   const r = await fetch(url, init)
@@ -111,4 +111,23 @@ export const chatApi = {
   setMode: (id: string, mode: string) => post(`${chatBase}/${enc(id)}/mode`, { mode }),
   setEffort: (id: string, effort: string) => post(`${chatBase}/${enc(id)}/effort`, { effort }),
   close: (id: string) => send('DELETE', `${chatBase}/${enc(id)}`),
+}
+
+/** Model Control: providers, routing groups, which agent uses what, the gateway. Always this computer's. */
+export const controlApi = {
+  state: () => get<CtlState>('/api/control/state'),
+  magpie: () => get<{ models: number } | null>('/api/control/magpie'),
+  addProvider: (p: { preset: string; name?: string; key?: string; endpoints?: Partial<Record<Protocol, string>> }) => post<{ provider: CtlProvider; warning?: string }>('/api/control/providers', p),
+  updateProvider: (id: string, p: { name?: string; key?: string; endpoints?: Partial<Record<Protocol, string>>; on?: boolean; models?: { id: string; on: boolean }[] }) => send<CtlProvider>('PUT', `/api/control/providers/${enc(id)}`, p),
+  removeProvider: (id: string) => send('DELETE', `/api/control/providers/${enc(id)}`),
+  refresh: (id: string) => post<CtlProvider>(`/api/control/providers/${enc(id)}/refresh`),
+  addGroup: (g: { name: string; mode?: string; members?: string[] }) => post<CtlGroup>('/api/control/groups', g),
+  updateGroup: (id: string, g: Partial<Pick<CtlGroup, 'name' | 'mode' | 'members' | 'on'>>) => send<CtlGroup>('PUT', `/api/control/groups/${enc(id)}`, g),
+  removeGroup: (id: string) => send('DELETE', `/api/control/groups/${enc(id)}`),
+  bind: (agent: string, target: string) => post('/api/control/bindings', { agent, target }),
+  wake: (member: string) => post('/api/control/members/wake', { member }),
+  gatewayKey: () => post<{ key: string }>('/api/control/gateway/key'),
+  rotateKey: () => post<{ key: string }>('/api/control/gateway/rotate'),
+  snippet: (agent: string, target?: string) => post<{ file: string; lang: string; text: string }>('/api/control/snippet', { agent, target }),
+  usage: (days: number) => get<UsageSummary>(`/api/control/usage?days=${days}`),
 }

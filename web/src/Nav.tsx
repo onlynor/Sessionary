@@ -6,6 +6,7 @@ import { go, href, type MachineTab, type Route } from './route'
 import { NotifyPanel, useNotify } from './notify'
 import { Popover } from './SettingsMenu'
 import { MachineIcon, StatusDot, machineTarget } from './ui'
+import { useControl } from './control'
 
 /** Which machine the scoped entries (Agents, Projects, …) act on: the open one, else the last one used. */
 export function Nav({ route, machineId, collapsed, onCollapse, onPalette, onSettings, trashCount }: {
@@ -15,6 +16,9 @@ export function Nav({ route, machineId, collapsed, onCollapse, onPalette, onSett
   const { machines } = useMachines()
   const [pick, setPick] = useState<{ left: number; top: number }>()
   const notify = useNotify()
+  const control = useControl()
+  // the gateway is answering someone right now
+  const live = (() => { const open = new Set<string>(); for (const e of control.events) { if (e.phase === 'answering' || e.phase === 'trying') open.add(e.id); else open.delete(e.id) } return open.size > 0 })()
   const [bell, setBell] = useState<{ left: number; bottom: number }>()
   const machine = machines.find((m) => m.id === machineId) ?? machines[0]
   const tab: MachineTab | null = route.page === 'machine' ? route.tab : route.page === 'agent' ? 'agents' : route.page === 'session' ? 'sessions' : null
@@ -48,7 +52,7 @@ export function Nav({ route, machineId, collapsed, onCollapse, onPalette, onSett
 
       {machine && (
         <div className="nav-group nav-machine">
-          <div className="nav-section nav-label">{t('Machine')}</div>
+          <div className="nav-section nav-label">{t('Workspace')}</div>
           <button className="machine-switch" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setPick(pick ? undefined : { left: r.left, top: r.bottom + 6 }) }}
             aria-haspopup="menu" aria-expanded={!!pick} title={collapsed ? machine.name : t('Switch machine')}>
             <MachineIcon machine={machine} size={collapsed ? 30 : 28} />
@@ -63,6 +67,16 @@ export function Nav({ route, machineId, collapsed, onCollapse, onPalette, onSett
           {scoped('monitor', 'activity', t('Monitor'))}
         </div>
       )}
+
+      {/* this computer's model routing: first-class, not a setting */}
+      <div className="nav-group">
+        <div className="nav-section nav-label">{t('Model Control')}</div>
+        <span className="nav-sep" aria-hidden="true" />
+        {item('models', 'models', t('Models'), href.models(), route.page === 'models', control.state?.providers.length || undefined)}
+        {item('routing', 'route', t('Routing'), href.routing(), route.page === 'routing', control.state?.groups.length || undefined)}
+        {item('gateway', 'gateway', t('Gateway'), href.gateway, route.page === 'gateway', live ? <span className="live-dot" title={t('Answering now')} /> : undefined)}
+        {item('usage', 'usage', t('Usage'), href.usage(), route.page === 'usage')}
+      </div>
 
       <span className="grow" />
       <div className="nav-group nav-foot">

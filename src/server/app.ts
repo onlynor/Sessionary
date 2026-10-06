@@ -20,6 +20,8 @@ import { agentsScript, localAgents, localSystem, parseAgents, parseSystem, SYSTE
 import { localTerminalSpec, ptyWrap, TerminalError, Terminals, type TermMeta } from '../core/terminals.ts'
 import { sshTerminalSpec } from '../core/sync.ts'
 import { OverlayStore } from '../core/overlay.ts'
+import { ControlStore } from '../core/control/store.ts'
+import { registerControl } from '../core/control/api.ts'
 import { purgeBackup, removeFromDisk, restoreFromBackup } from '../core/removal.ts'
 import { RemovalError } from '../core/model.ts'
 import { publicRun, RunError, Runs } from '../core/runs.ts'
@@ -81,6 +83,10 @@ export interface AppOptions {
    * machine's disk on the strength of a path recorded elsewhere (git state, file tree, opening folders).
    */
   readOnly?: boolean
+  /** the port agents reach the gateway on (Model Control); the server's own */
+  port?: number
+  /** Model Control's store (`control.db`); in memory when not given, as the overlay is */
+  control?: ControlStore
 }
 const LOCAL_ONLY = /\/api\/sessions\/[^/]+\/(context|tree|changes|changes\/file|run)$/
 /** decisions kept in Sessionary's own overlay: they change nothing on the other machine, so a view may make them */
@@ -556,6 +562,8 @@ export function createApp(store: IndexStore, webRoot?: string, overlay: OverlayS
     return r.json()
   }
   if (!opts.readOnly) {
+    // ---- Model Control: providers, routing groups, which agent uses what, and the gateway agents are pointed at ----
+    const control = registerControl(app, { store: opts.control ?? new ControlStore(':memory:'), gatewayBase: () => `http://127.0.0.1:${opts.port ?? 4777}/gateway`, broadcast })
     app.get('/api/machines', (c) => c.json([
       { id: 'local', name: 'Localhost', kind: 'local', state: 'online', host: os.hostname(), platform: process.platform, at: 0 },
       ...nodes.list(),
@@ -629,9 +637,12 @@ export function createApp(store: IndexStore, webRoot?: string, overlay: OverlayS
         run = { bin: node ? (cmd.bin.split('/').pop() ?? cmd.bin) : cmd.bin, args: cmd.args }
         meta.title = `${a.label} · ${cwd?.split('/').filter(Boolean).pop() ?? 'new session'}`
       }
+      // a bound agent started here goes through the gateway: its routing is added to how it is started
+      const extra = run && meta.agent ? control.launchFor(meta.agent, machine) : undefined
+      if (run && extra) run = { bin: run.bin, args: [...extra.args, ...run.args] }
       if (!node) {
         if (cwd && !existsSync(cwd)) cwd = undefined
-        return terminals.create(meta, localTerminalSpec({ cwd: cwd ?? os.homedir(), run, size }))
+        return terminals.create(meta, localTerminalSpec({ cwd: cwd ?? os.homedir(), run, size, env: extra?.env }))
       }
       const spec = sshTerminalSpec(nodes.target(machine), { cwd, run, size })
       return terminals.create(meta, ptyWrap(spec, size))
@@ -689,6 +700,7 @@ export function createApp(store: IndexStore, webRoot?: string, overlay: OverlayS
     const chatLabel = (id: string) => localAdapters.find((a) => a.id === id)?.label ?? id
     const chats = new Chats({
       spawnFor: (machine) => (machine === 'local' ? localSpawner : sshSpawner(nodes.target(machine))),
+      launchFor: (agent, machine) => control.launchFor(agent, machine),
       hooks: {
         changed: (ch, why) => {
           if (why === 'approval') notifier.emit({ type: 'agent', code: 'chat.approval', key: `chat-approval:${ch.id}`, machine: ch.machine, params: { agent: chatLabel(ch.agent), title: ch.title ?? ch.preview ?? '', machineName: nameOf(ch.machine), chat: ch.id, session: ch.sessionKey ?? '' } })

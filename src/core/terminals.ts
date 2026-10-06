@@ -8,7 +8,8 @@ import { posix, type TermSize } from './sync.ts'
  * — "reconnect" is just attaching to what is still running.
  */
 /** `control`: a fourth pipe the program reads size changes from (the PTY helper below) */
-export interface SpawnSpec { bin: string; args: string[]; cwd?: string; control?: boolean }
+/** `env` is added to the process's environment (an agent's model routing, see control/agents.ts) */
+export interface SpawnSpec { bin: string; args: string[]; cwd?: string; control?: boolean; env?: Record<string, string> }
 
 export interface TermMeta {
   machine: string
@@ -66,7 +67,7 @@ export class Terminals {
     if (running >= this.max) throw new TerminalError(`At most ${this.max} terminals can run at once. Close one first.`)
     const proc = spawn(spec.bin, spec.args, {
       cwd: spec.cwd, stdio: spec.control ? ['pipe', 'pipe', 'pipe', 'pipe'] : ['pipe', 'pipe', 'pipe'], windowsHide: true,
-      env: { ...process.env, TERM: 'xterm-256color', COLORTERM: 'truecolor' },
+      env: { ...process.env, ...spec.env, TERM: 'xterm-256color', COLORTERM: 'truecolor' },
     })
     const info: TermInfo = { ...meta, id: randomBytes(5).toString('hex'), pid: proc.pid, state: 'running', startedAt: Date.now(), bytes: 0, resizable: !!spec.control }
     const term: Term = { info, proc, control: spec.control ? (proc.stdio[3] as NodeJS.WritableStream) : undefined, lastOut: 0, burstStart: 0, burstBytes: 0, chunks: [], size: 0, subs: new Set() }
@@ -213,18 +214,18 @@ sys.exit(os.WEXITSTATUS(st) if os.WIFEXITED(st) else 128 + os.WTERMSIG(st))
 export function ptyWrap(spec: SpawnSpec, size?: Partial<TermSize>): SpawnSpec {
   if (process.platform === 'win32' || !has('python3')) return spec
   const cols = Math.max(20, Math.min(500, Math.round(size?.cols ?? 100))), rows = Math.max(5, Math.min(200, Math.round(size?.rows ?? 30)))
-  return { bin: 'python3', args: ['-c', PTY_HELPER, String(cols), String(rows), spec.bin, ...spec.args], cwd: spec.cwd, control: true }
+  return { bin: 'python3', args: ['-c', PTY_HELPER, String(cols), String(rows), spec.bin, ...spec.args], cwd: spec.cwd, control: true, env: spec.env }
 }
 
 /** A terminal on this computer: the shell, or `run`, in `cwd`. */
-export function localTerminalSpec(o: { cwd?: string; run?: { bin: string; args: string[] }; size?: Partial<TermSize> }): SpawnSpec {
+export function localTerminalSpec(o: { cwd?: string; run?: { bin: string; args: string[] }; size?: Partial<TermSize>; env?: Record<string, string> }): SpawnSpec {
   if (process.platform === 'win32') throw new TerminalError('Terminals on this computer are not available on Windows yet.')
   const cols = Math.max(20, Math.min(500, Math.round(o.size?.cols ?? 100))), rows = Math.max(5, Math.min(200, Math.round(o.size?.rows ?? 30)))
   const run = o.run ? [o.run.bin, ...o.run.args].map(posix).join(' ') : `${posix(process.env.SHELL || '/bin/sh')} -l`
   const line = `stty cols ${cols} rows ${rows} 2>/dev/null; exec ${run}`
-  const inner: SpawnSpec = { bin: 'sh', args: ['-c', line], cwd: o.cwd }
+  const inner: SpawnSpec = { bin: 'sh', args: ['-c', line], cwd: o.cwd, env: o.env }
   if (has('python3')) return ptyWrap(inner, o.size)
-  if (process.platform === 'darwin' && has('script')) return { bin: 'script', args: ['-q', '/dev/null', 'sh', '-c', line], cwd: o.cwd }
-  if (has('script')) return { bin: 'script', args: ['-qfc', line, '/dev/null'], cwd: o.cwd }
+  if (process.platform === 'darwin' && has('script')) return { bin: 'script', args: ['-q', '/dev/null', 'sh', '-c', line], cwd: o.cwd, env: o.env }
+  if (has('script')) return { bin: 'script', args: ['-qfc', line, '/dev/null'], cwd: o.cwd, env: o.env }
   throw new TerminalError('A terminal needs Python 3 or the `script` command on this computer.')
 }

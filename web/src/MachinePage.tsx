@@ -7,6 +7,7 @@ import { relAgo, relTime } from './format'
 import { Icon } from './Icon'
 import { useInstalled, useMachine, useMachines, useSystem, usable } from './machines'
 import { MonitorTab } from './MonitorTab'
+import { TargetMark, describeTarget, useControl } from './control'
 import { ProjectsTab, SessionsTab, TrashTab, useTrashCount, projectsOf, type MachineRoute } from './MachineTabs'
 import { go, href, type MachineTab } from './route'
 import { TerminalTab } from './TerminalTab'
@@ -21,6 +22,7 @@ function AgentsTab() {
   const { installed, at: checkedAt, busy: checking, refresh } = useInstalled(machine)
   const [syncing, setSyncing] = useState(false)
   const projects = projectsOf(sessions)
+  const control = useControl()
 
   return (
     <>
@@ -54,6 +56,7 @@ function AgentsTab() {
                   <span className={`ac-dot ${state === 'desktop' ? 'available' : state}`} />
                   {state === 'available' || state === 'desktop' ? t('Available') : state === 'history' ? t('Not found on PATH') : state === 'missing' ? t('Not installed') : t('Checking…')}
                 </div>
+                {machine.kind === 'local' && <AgentRoute agent={a.id} control={control} />}
                 <div className="agent-nums">
                   <div><b>{a.sessionCount}</b><span>{t('Sessions')}</span></div>
                   <div><b>{nProjects}</b><span>{t('Projects')}</span></div>
@@ -82,6 +85,20 @@ function AgentsTab() {
         )}
       </div>
     </>
+  )
+}
+
+/** which model a routable agent is started on from Sessionary, and the way to change it */
+function AgentRoute({ agent, control }: { agent: string; control: ReturnType<typeof useControl> }) {
+  const a = control.state?.agents.find((x) => x.agent === agent)
+  if (!a) return null
+  const d = a.target ? describeTarget(control.state, a.target) : undefined
+  return (
+    <a className="ac-route" href={href.routing()} title={t('Choose the model on Routing')}>
+      {a.target ? <TargetMark target={a.target} size={16} /> : <Icon name="route" size={13} />}
+      <span className="ellip">{d ? <><b>{d.title}</b> · {t('through the gateway')}</> : a.via === 'magpie' ? t('Its own setting, through Magpie') : t('Its own model setting')}</span>
+      <Icon name="chev" size={11} />
+    </a>
   )
 }
 

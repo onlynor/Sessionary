@@ -20,6 +20,11 @@ import { Prompt, type PromptSpec } from './Prompt'
 import { go, href, useRoute, type Route } from './route'
 import { SessionPage } from './SessionPage'
 import { ChatPage } from './ChatPage'
+import { ControlProvider } from './control'
+import { GatewayPage } from './GatewayPage'
+import { ModelsPage } from './ModelsPage'
+import { RoutingPage } from './RoutingPage'
+import { UsagePage } from './UsagePage'
 import { SettingsMenu } from './SettingsMenu'
 import { Toast, type ToastMsg } from './Toast'
 import { useTheme } from './theme'
@@ -149,6 +154,7 @@ function Window({ route, machine, lang, theme, setTheme, down }: { route: Route;
     <UiContext.Provider value={ui}>
       <LayoutCtx.Provider value={layout}>
         <NotifyProvider>
+        <ControlProvider>
         <div ref={win} className={`window ${narrow ? 'narrow' : ''} ${compact ? 'compact' : ''}`} data-side={navCollapsed ? 'collapsed' : 'expanded'} data-insp={hasInsp && inspOpen ? 'open' : 'closed'}
           style={{ '--side-w': '232px', '--insp-w': `${inspW}px` } as React.CSSProperties}>
           <aside className={`side ${compact && navOpen ? 'shown' : ''}`} aria-label={t('Navigation')}>
@@ -165,6 +171,10 @@ function Window({ route, machine, lang, theme, setTheme, down }: { route: Route;
               : route.page === 'machine' ? <MachinePage route={route} />
               : route.page === 'agent' ? <AgentPage route={route} />
               : route.page === 'chat' ? <ChatPage route={route} />
+              : route.page === 'models' ? <ModelsPage provider={route.provider} add={route.add} />
+              : route.page === 'routing' ? <RoutingPage group={route.group} />
+              : route.page === 'gateway' ? <GatewayPage />
+              : route.page === 'usage' ? <UsagePage source={route.source} />
               : <SessionPage route={route} />}
           </div>
 
@@ -186,6 +196,7 @@ function Window({ route, machine, lang, theme, setTheme, down }: { route: Route;
             </div>
           )}
         </div>
+        </ControlProvider>
         </NotifyProvider>
       </LayoutCtx.Provider>
     </UiContext.Provider>
@@ -213,6 +224,11 @@ function PaletteHost({ machine, onClose, toggleNav, rescan, theme, setTheme, lan
         { id: 'sessions', label: `${machine.name}: ${t('Sessions')}`, icon: 'message', run: () => go(href.machine(machine.id, 'sessions')) },
         { id: 'terminal', label: t('Open a terminal'), icon: 'terminal', run: () => launchTerminal(ui.say, { machine: machine.id, kind: 'shell' }) },
         { id: 'monitor', label: `${machine.name}: ${t('Monitor')}`, icon: 'activity', run: () => go(href.machine(machine.id, 'monitor')) },
+        { id: 'models', label: t('Models'), icon: 'models', run: () => go(href.models()) },
+        { id: 'provider-add', label: t('Add provider'), icon: 'other', run: () => go(href.models(undefined, { add: '1' })) },
+        { id: 'routing', label: t('Routing'), icon: 'route', run: () => go(href.routing()) },
+        { id: 'gateway', label: t('Gateway'), icon: 'gateway', run: () => go(href.gateway) },
+        { id: 'usage', label: t('Usage'), icon: 'usage', run: () => go(href.usage()) },
         { id: 'trash', label: t('Open Trash'), icon: 'archive', run: () => go(href.machine(machine.id, 'trash')) },
         { id: 'node-add', label: t('Add Node'), icon: 'server', run: () => go(href.nodes({ add: '1' })) },
         { id: 'nodes', label: t('Manage nodes'), icon: 'server', run: () => go(href.nodes()) },
