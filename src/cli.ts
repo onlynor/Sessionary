@@ -22,7 +22,7 @@ const webRoot = [path.join(here, '..', 'web-dist'), path.join(here, 'web-dist')]
 const port = Number(opt('port') ?? process.env.PORT ?? 4777)
 const host = opt('host') ?? '127.0.0.1'
 const store = new IndexStore()
-const { app, rescan, startWatching, stopRuns } = createApp(store, webRoot, new OverlayStore())
+const { app, rescan, startWatching, autoConnect, stopRuns } = createApp(store, webRoot, new OverlayStore())
 // agents we started must not outlive the server
 for (const sig of ['SIGINT', 'SIGTERM'] as const) process.on(sig, () => { stopRuns(); process.exit(0) })
 
@@ -32,6 +32,7 @@ for (const r of reports as any[]) console.log(`  ${r.agent.padEnd(12)} ${r.found
 console.log(`indexed in ${Date.now() - t0}ms`)
 
 // agents' writes trigger a rescan within a second; the slow poll only catches what file events miss
+autoConnect()
 const stopWatching = flag('no-watch') ? () => {} : startWatching()
 setInterval(() => rescan().catch(() => {}), 60_000).unref()
 process.on('exit', () => stopWatching())
