@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { t, useT } from './i18n'
-import { api } from './api'
+import { useApi } from './machines'
 import { Icon } from './Icon'
 import type { Snip } from './types'
 
@@ -12,6 +12,7 @@ export function FindBar({ sessionId, initial, onClose, onGoto, onQuery }: {
   sessionId: string; initial: string; onClose: () => void; onGoto: (msgIndex: number) => void; onQuery: (q: string) => void
 }) {
   useT()
+  const api = useApi()
   const [q, setQ] = useState(initial)
   const [hits, setHits] = useState<Snip[] | null>(null)
   const [cur, setCur] = useState(0)

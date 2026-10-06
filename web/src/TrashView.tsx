@@ -2,21 +2,22 @@ import { useEffect, useState } from 'react'
 import { t, useT } from './i18n'
 import { AgentIcon } from './AgentIcon'
 import { Icon } from './Icon'
-import { api } from './api'
+import { useApi } from './machines'
 import { cleanTitle, relAgo } from './format'
 import type { Trash } from './types'
 
 /** Sessionary's trash: things hidden from this app only. The agents' own files were never touched. */
-export function TrashView({ rev, onChanged, onOpen, onRestoreRemoved, onPurge }: { rev: number; onChanged: () => void; onOpen: (id: string) => void; onRestoreRemoved: (id: string) => void; onPurge: (id: string, title: string) => void }) {
+export function TrashView({ rev, onChanged, onOpen, onRestoreRemoved, onPurge, embedded }: { rev: number; onChanged: () => void; onOpen: (id: string) => void; onRestoreRemoved: (id: string) => void; onPurge: (id: string, title: string) => void; embedded?: boolean }) {
   useT()
+  const api = useApi()
   const [trash, setTrash] = useState<Trash | null>(null)
   useEffect(() => { api.trash().then(setTrash, () => setTrash({ sessions: [], partial: [], removed: [] })) }, [rev])
   const act = async (p: Promise<unknown>) => { await p; onChanged() }
   const empty = trash && !trash.sessions.length && !trash.partial.length && !trash.removed.length
   return (
-    <div className="page">
-      <div className="page-inner trash enter">
-        <h1>{t('Trash')}</h1>
+    <div className={embedded ? '' : 'page'}>
+      <div className={embedded ? 'trash' : 'page-inner trash enter'}>
+        {!embedded && <h1>{t('Trash')}</h1>}
         <p className="page-lede">{t("Hidden items are only hidden from Sessionary — the agents still see them. Sessions deleted from disk live in Sessionary's backup until you delete the backup.")}</p>
         {!trash ? <div className="sk-line" /> : empty ? <div className="empty-state"><span className="tile"><Icon name="trash" size={28} stroke={1.5} /></span>{t('Nothing in the Trash.')}</div> : (
           <>

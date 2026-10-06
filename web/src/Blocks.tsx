@@ -1,6 +1,6 @@
 import { createContext, useContext, useId, useState } from 'react'
 import { t, useT } from './i18n'
-import { api } from './api'
+import { useApi } from './machines'
 import { diffOf, diffStats } from './diff'
 import { DiffView } from './DiffView'
 import { Icon } from './Icon'
@@ -144,6 +144,7 @@ export function Steps({ blocks, okey, bmi }: { blocks: Run[]; okey: string; bmi?
 
 export function BlockView({ b }: { b: Block }) {
   const { sessionId } = useContext(ViewPrefs)
+  const api = useApi()
   switch (b.type) {
     case 'text': return <Markdown text={b.text} />
     case 'thinking': return <div className="rail"><Thinking b={b} /></div>

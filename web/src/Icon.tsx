@@ -2,7 +2,7 @@ import {
   ArrowDown, ArrowUp, Bot, Check, ChevronDown, ChevronRight, ChevronsUpDown, CircleDot, Copy, Ellipsis, ExternalLink, EyeOff, File, FilePen,
   FilePlus, FileText, Folder, FolderOpen, GitBranch, Globe, Keyboard, Languages, Layers, Lightbulb, ListChecks, ListChevronsDownUp, ListChevronsUpDown, Lock,
   LockOpen, MessageSquare, Monitor, Moon, PanelLeft, PanelLeftOpen, PanelRight, Plus, RefreshCw, Search, Settings2, Sun, Terminal, TextSearch,
-  Trash2, User, X, Pin, PinOff, Play, Code, SquareTerminal, ArrowDownWideNarrow, Radio, Clipboard, type LucideIcon,
+  Trash2, User, X, Pin, PinOff, Play, Code, SquareTerminal, ArrowDownWideNarrow, Radio, Clipboard, Server, Laptop, House, Activity, Cpu, Pencil, Square, RotateCw, HardDrive, Archive, Plug, Unplug, MemoryStick, CircleCheck, TriangleAlert, Bell, BellOff, type LucideIcon,
 } from 'lucide-react'
 
 /** One icon vocabulary (lucide). Strokes are absolute, so a 12px and an 18px icon draw the same line weight. */
@@ -15,7 +15,7 @@ const ICONS = {
   expand: ListChevronsUpDown, collapse: ListChevronsDownUp, arrowdown: ArrowDown, arrowup: ArrowUp, keyboard: Keyboard, user: User, trash: Trash2,
   more: Ellipsis, eyeoff: EyeOff, check: Check, x: X, lock: Lock, unlock: LockOpen, settings: Settings2, sun: Sun, moon: Moon, monitor: Monitor,
   dirty: CircleDot, message: MessageSquare, external: ExternalLink, languages: Languages,
-  pin: Pin, unpin: PinOff, play: Play, code: Code, terminal: SquareTerminal, sort: ArrowDownWideNarrow, live: Radio, clipboard: Clipboard,
+  pin: Pin, unpin: PinOff, play: Play, code: Code, terminal: SquareTerminal, sort: ArrowDownWideNarrow, live: Radio, clipboard: Clipboard, server: Server, laptop: Laptop, home: House, activity: Activity, cpu: Cpu, edit2: Pencil, stop: Square, restart: RotateCw, disk: HardDrive, archive: Archive, plug: Plug, unplug: Unplug, memory: MemoryStick, ok: CircleCheck, warn: TriangleAlert, bell: Bell, 'bell-off': BellOff,
 } satisfies Record<string, LucideIcon>
 
 export type IconName = keyof typeof ICONS

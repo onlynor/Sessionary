@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { t, tx, useT } from './i18n'
-import { api } from './api'
+import { useApi } from './machines'
 import { diffOf, diffStats } from './diff'
 import { DiffModeToggle, DiffView } from './DiffView'
 import { relTo, splitPath } from './format'
@@ -52,6 +52,7 @@ function FileCard({ id, path, root, open, onToggle, badge, stat, children, focus
 }
 
 function GitFile({ sid, file }: { sid: string; file: string }) {
+  const api = useApi()
   useT()
   const [d, setD] = useState<FileDiff | null | 'err'>(null)
   useEffect(() => { api.changeFile(sid, file).then(setD, () => setD('err')) }, [sid, file])
@@ -63,6 +64,7 @@ function GitFile({ sid, file }: { sid: string; file: string }) {
 }
 
 export function ChangesView({ summary: session, edits, focus, onFocus }: { summary: SessionSummary; edits: EditBlock[]; focus?: ChangeFocus; onFocus: (f: ChangeFocus) => void }) {
+  const api = useApi()
   useT()
   const recorded = useMemo(() => recordedEdits(edits), [edits])
   const [git, setGit] = useState<Changes | null>(null)

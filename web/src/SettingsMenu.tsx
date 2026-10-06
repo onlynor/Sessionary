@@ -1,12 +1,12 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Icon } from './Icon'
-import { THEMES, type Density, type ThemeChoice } from './theme'
+import { THEMES, type ThemeChoice } from './theme'
 import { LANGS, t, useT, type Lang } from './i18n'
 import { relAgo } from './format'
 
 /** A menu at a fixed screen point (opening upwards from `bottom`, or down from `top`), kept on screen. */
-export function Popover({ at, onClose, children, width = 260, label }: {
-  at: { left: number; top?: number; bottom?: number }; onClose: () => void; children: React.ReactNode; width?: number; label: string
+export function Popover({ at, onClose, children, width = 260, label, solid }: {
+  at: { left: number; top?: number; bottom?: number }; onClose: () => void; children: React.ReactNode; width?: number; label: string; solid?: boolean
 }) {
   const ref = useRef<HTMLDivElement>(null)
   const [left, setLeft] = useState(at.left)
@@ -20,24 +20,23 @@ export function Popover({ at, onClose, children, width = 260, label }: {
     return () => { clearTimeout(t); removeEventListener('mousedown', off); removeEventListener('keydown', key); removeEventListener('resize', onClose) }
   }, [onClose])
   return (
-    <div ref={ref} className="menu fixed pop-in" role="menu" aria-label={label}
+    <div ref={ref} className={`menu fixed pop-in ${solid ? 'solid' : ''}`} role="menu" aria-label={label}
       style={{ left, width, top: at.top, bottom: at.bottom, transformOrigin: at.bottom != null ? 'bottom left' : 'top left' }}>
       {children}
     </div>
   )
 }
 
-/** Everything used rarely lives here: Trash, rescan, appearance, list density, shortcuts, index status. */
+/** Everything used rarely lives here: rescan, appearance, language, shortcuts, index status. */
 export function SettingsMenu(p: {
   at: { left: number; top?: number; bottom?: number }; onClose: () => void
-  theme: ThemeChoice; onTheme: (t: ThemeChoice) => void; density: Density; onDensity: (d: Density) => void; lang: Lang; onLang: (l: Lang) => void
-  trashCount: number; onOpenTrash: () => void; onRefresh: () => void; refreshing: boolean; lastScan?: number; indexed: number; onHelp: () => void
+  theme: ThemeChoice; onTheme: (t: ThemeChoice) => void; lang: Lang; onLang: (l: Lang) => void
+  onRefresh: () => void; refreshing: boolean; lastScan?: number; indexed: number; machine: string; onHelp: () => void
 }) {
   useT()
   const run = (f: () => void) => () => { f(); p.onClose() }
   return (
     <Popover at={p.at} onClose={p.onClose} label={t('Settings')}>
-      <button className="menu-item" role="menuitem" onClick={run(p.onOpenTrash)}><Icon name="trash" /><span className="grow">{t('Trash')}</span>{p.trashCount > 0 && <span className="menu-meta">{p.trashCount > 99 ? '99+' : p.trashCount}</span>}</button>
       <button className="menu-item" role="menuitem" onClick={run(p.onRefresh)} disabled={p.refreshing}><Icon name="refresh" /><span className="grow">{p.refreshing ? t('Scanning…') : t('Rescan sources')}</span></button>
       <div className="menu-sep" />
       <div className="menu-label">{t('Appearance')}</div>
@@ -54,16 +53,9 @@ export function SettingsMenu(p: {
         ))}
       </div>
       <div className="menu-sep" />
-      <div className="menu-label">{t('Session list')}</div>
-      {(['comfortable', 'compact'] as const).map((d) => (
-        <button key={d} className="menu-item" role="menuitemradio" aria-checked={p.density === d} onClick={() => p.onDensity(d)}>
-          <Icon name={d === 'compact' ? 'collapse' : 'expand'} /><span className="grow">{d === 'compact' ? t('Compact') : t('Comfortable')}</span>{p.density === d && <span className="check"><Icon name="check" size={14} /></span>}
-        </button>
-      ))}
-      <div className="menu-sep" />
       <button className="menu-item" role="menuitem" onClick={run(p.onHelp)}><Icon name="keyboard" /><span className="grow">{t('Keyboard shortcuts')}</span><kbd>?</kbd></button>
       <div className="menu-sep" />
-      <div className="menu-foot"><span className={p.refreshing ? 'spinner' : 'dot ok'} />{t('{n} sessions indexed', { n: p.indexed })}{p.lastScan ? ` · ${relAgo(p.lastScan)}` : ''}</div>
+      <div className="menu-foot"><span className={p.refreshing ? 'spinner' : 'dot ok'} />{t('{n} sessions indexed on {machine}', { n: p.indexed, machine: p.machine })}{p.lastScan ? ` · ${relAgo(p.lastScan)}` : ''}</div>
     </Popover>
   )
 }

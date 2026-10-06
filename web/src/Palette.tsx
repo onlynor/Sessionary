@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { t, tx, useT } from './i18n'
 import { AgentIcon } from './AgentIcon'
-import { api } from './api'
+import { useApi } from './machines'
 import { relTime } from './format'
 import { Snippet } from './Snippet'
 import { Icon } from './Icon'
@@ -31,6 +31,7 @@ export function Palette({ sessions, recent = [], onPick, onPickHit, onClose, com
   sessions: SessionSummary[]; recent?: string[]; onPick: (id: string) => void; onPickHit: (id: string, q: string, msgIndex: number) => void; onClose: () => void; commands?: Command[]
 }) {
   useT()
+  const api = useApi()
   const [q, setQ] = useState('')
   const [cur, setCur] = useState(0)
   const [hits, setHits] = useState<SearchHit[]>([])

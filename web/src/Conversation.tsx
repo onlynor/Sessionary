@@ -8,7 +8,7 @@ import { Composer } from './Composer'
 import { ContextMenu, type MenuItem } from './ContextMenu'
 import { FindBar } from './FindBar'
 import { Outline, type OutlineEntry } from './Outline'
-import { api } from './api'
+import { useApi } from './machines'
 import { cleanTitle, clock, compact, duration, fullTime, shortDate } from './format'
 import { Markdown } from './Markdown'
 import { Icon } from './Icon'
@@ -65,7 +65,7 @@ function toItems(messages: Message[]): Item[] {
 /** Row actions, provided by the conversation so memoised rows don't need new props. */
 const Actions = createContext({ hideTurn: (_mi: number) => {}, hideMessage: (_mi: number) => {}, restore: (_ids: string[]) => {} })
 
-const NAMES: Record<string, string> = { 'claude-code': 'Claude Code', opencode: 'OpenCode', pi: 'Pi' }
+const NAMES: Record<string, string> = { 'claude-code': 'Claude Code', opencode: 'OpenCode', pi: 'Pi', hermes: 'Hermes', codex: 'Codex', workbuddy: 'WorkBuddy', 'workbuddy-ai': 'WorkBuddy AI' }
 export const agentName = (id: string) => NAMES[id] ?? id
 
 const ItemView = memo(function ItemView({ it, agent }: { it: Item; agent: string }) {
@@ -219,6 +219,10 @@ interface Props {
   hiddenRev: number
   run?: AgentRun
   pending?: string
+  /** a live chat: what it is saying now (drawn after the history), the box that talks to it, and a counter that moves when it does */
+  live?: React.ReactNode
+  liveTick?: number
+  composer?: (h: { onSent: () => void }) => React.ReactNode
   onSend: (prompt: string, allowWrite: boolean) => Promise<boolean>
   onStop: () => void
   onTrash: () => void
@@ -228,8 +232,9 @@ interface Props {
   onRestoreMessages: (ids: string[]) => void
   /** from the URL: open find with this query and jump to this message */
   findInit?: { q: string; m?: number }
-  sidebarHidden: boolean
-  onShowSidebar: () => void
+  /** where this session sits: machine / agent / project, shown at the left of the toolbar */
+  crumbs?: React.ReactNode
+  onRename: (title: string) => void
   inspectorOpen: boolean
   onToggleInspector: () => void
   /** actions on this session, shared with the sidebar menu */
@@ -240,6 +245,7 @@ interface Props {
 
 export function Conversation(p: Props) {
   useT()
+  const api = useApi()
   const s = p.session ?? p.summary
   const scroller = useRef<HTMLDivElement>(null)
   const [expandAll, setExpandAll] = useState(false)
@@ -393,6 +399,12 @@ export function Conversation(p: Props) {
   useEffect(() => {
     if ((running || p.pending) && stick.current && items.length) virt.scrollToIndex(items.length - 1, { align: 'end' })
   }, [items.length, items[items.length - 1], running, p.pending])
+  // a live chat grows below the virtual list: stay at its end while the reader is
+  useEffect(() => {
+    if (p.liveTick == null || !stick.current) return
+    const el = scroller.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [p.liveTick])
   const send = async (prompt: string, allowWrite: boolean) => {
     stick.current = true
     const ok = await p.onSend(prompt, allowWrite)
@@ -431,7 +443,7 @@ export function Conversation(p: Props) {
   return (
     <main className="content">
       <header className={`toolbar ${scrolled || p.view === 'changes' ? 'edge' : ''}`}>
-        {p.sidebarHidden && <button className="tb-btn" onClick={p.onShowSidebar} title={`${t('Show sidebar')}  [`} aria-label={t('Show sidebar')}><Icon name="sidebar" /></button>}
+        {p.crumbs}
         <div className="tb-title" title={s.title} aria-hidden={!scrolled && p.view !== 'changes'}>{cleanTitle(s.title)}</div>
         <div className="seg tb-center" role="tablist" aria-label={t('View')}>
           <button role="tab" aria-selected={p.view === 'chat'} className={p.view === 'chat' ? 'on' : ''} onClick={() => p.onView('chat')}>{t('Conversation')}</button>
@@ -475,7 +487,7 @@ export function Conversation(p: Props) {
                 <div className="thread enter" key={s.id}>
                   <header className="doc-head">
                     <div className="doc-title-row">
-                      <h1>{cleanTitle(s.title)}</h1>
+                      <TitleEditor title={cleanTitle(s.title)} renamed={!!s.renamed} onSave={p.onRename} />
                       {s.active && <span className="live-badge" title={p.run?.status === 'running' ? t('Sessionary is running a prompt in this session') : t('Written to in the last two minutes — probably open in {agent}', { agent: agentName(s.agent) })}><span className="live-dot" />{t('Active')}</span>}
                     </div>
                     <div className="doc-meta">
@@ -509,6 +521,7 @@ export function Conversation(p: Props) {
                       <div className="who">{t('You')}<time>{t('sending…')}</time></div><div className="bubble">{p.pending}</div>
                     </section>
                   )}
+                  {p.live}
                   {running && !p.pending && <div className="working-row"><span className="spinner" />{t('{agent} is working…', { agent: agentName(s.agent) })}</div>}
                   {hasMore && <div className="more-below">{t('Loading more · {n} messages left', { n: p.session.page.total - p.session.page.end })}</div>}
                   {!hasMore && p.session.children.length > 0 && (
@@ -523,7 +536,8 @@ export function Conversation(p: Props) {
           <KeyExpand onToggle={() => setExpandAll((v) => !v)} />
         </div>
       )}
-      {p.view === 'chat' && p.session && (
+      {p.view === 'chat' && p.session && p.composer?.({ onSent: () => { stick.current = true; requestAnimationFrame(() => scroller.current?.scrollTo({ top: scroller.current.scrollHeight, behavior: 'smooth' })) } })}
+      {p.view === 'chat' && p.session && !p.composer && (
         <Composer agent={s.agent} agentName={agentName(s.agent)} run={p.run} onSend={send} onStop={p.onStop}
           disabled={p.session.trashed ? t('This session is in the Trash — restore it to continue') : s.parentId ? t('Sub-agent sessions can’t be continued — continue the parent session') : undefined} />
       )}
@@ -548,7 +562,7 @@ function SessionActions({ q, canContinue, onContinueHere }: { q: Quick; canConti
   return (
     <div className="doc-actions">
       <button className="btn primary" onClick={q.onResume} disabled={!q.canResume}
-        title={q.canResume ? t('Reopen this session interactively in {terminal}', { terminal: q.terminal ?? t('a terminal') }) : t('No terminal was found on this machine')}>
+        title={q.canResume ? t('Reopen this session in a terminal here') : t('This agent has no resume command')}>
         <Icon name="play" size={14} stroke={1.8} />{t('Resume in Terminal')}
       </button>
       {canContinue && <button className="btn" onClick={onContinueHere} title={t('Send one more prompt from here, read-only by default')}><Icon name="message" size={14} />{t('Continue here')}</button>}
@@ -558,6 +572,26 @@ function SessionActions({ q, canContinue, onContinueHere }: { q: Quick; canConti
       {q.onEditor && <button className="btn icon" onClick={q.onEditor} title={q.editor ? t('Open in {editor}', { editor: q.editor }) : t('Open in editor')} aria-label={t('Open in editor')}><Icon name="code" size={15} /></button>}
       <button className={`btn icon ${q.pinned ? 'on' : ''}`} onClick={q.onPin} title={`${q.pinned ? t('Unpin') : t('Pin')}  P`} aria-label={q.pinned ? t('Unpin') : t('Pin')} aria-pressed={q.pinned}><Icon name="pin" size={15} /></button>
     </div>
+  )
+}
+
+/** the session's name, with a pencil to give it one of your own (the agent's files keep theirs) */
+function TitleEditor({ title, renamed, onSave }: { title: string; renamed: boolean; onSave: (title: string) => void }) {
+  useT()
+  const [editing, setEditing] = useState(false)
+  const [v, setV] = useState(title)
+  useEffect(() => { setV(title); setEditing(false) }, [title])
+  if (editing) return (
+    <form className="title-edit" onSubmit={(e) => { e.preventDefault(); setEditing(false); if (v.trim() !== title) onSave(v.trim()) }}>
+      <input autoFocus value={v} onChange={(e) => setV(e.target.value)} onKeyDown={(e) => { if (e.key === 'Escape') setEditing(false) }} onBlur={() => setEditing(false)} aria-label={t('Rename')} maxLength={200} placeholder={t('Name this session')} />
+    </form>
+  )
+  return (
+    <>
+      <h1>{title}</h1>
+      <button className="tb-btn sm title-pencil" onClick={() => setEditing(true)} title={t('Rename')} aria-label={t('Rename')}><Icon name="edit2" size={14} /></button>
+      {renamed && <button className="chip link" onClick={() => onSave('')} title={t('Use the name the agent gave it')}>{t('Renamed')} ✕</button>}
+    </>
   )
 }
 

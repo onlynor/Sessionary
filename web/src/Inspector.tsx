@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { t, useT } from './i18n'
-import { api } from './api'
+import { useApi } from './machines'
 import { pathOf } from './Blocks'
 import { diffOf, diffStats } from './diff'
 import { compact, fullTime, relTime, relTo, splitPath } from './format'
@@ -38,6 +38,7 @@ function FileLine({ path, root, onClick, trailing, lead }: { path: string; root?
 }
 
 function TreeDir({ sid, rel, depth, touched, open, onFile }: { sid: string; rel: string; depth: number; touched: Map<string, boolean>; open: Set<string>; onFile: (rel: string) => void }) {
+  const api = useApi()
   useT()
   const [entries, setEntries] = useState<TreeEntry[] | null>(null)
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
