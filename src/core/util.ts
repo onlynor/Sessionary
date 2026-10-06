@@ -29,3 +29,22 @@ export function* jsonlLines(text: string): Generator<any> {
 
 /** Prompts are passed as a CLI argument; one that starts with "-" would be read as a flag. */
 export const argSafe = (prompt: string) => (prompt.startsWith('-') ? ' ' + prompt : prompt)
+
+/** Where each agent keeps its history. A node's mirror has the same layout under its own directory. */
+export interface Roots { claude: string; pi: string; xdgData: string; hermes: string; codex: string; workbuddy: string; workbuddyAi: string }
+export const localRoots = (): Roots => ({
+  claude: process.env.CLAUDE_CONFIG_DIR ?? path.join(home(), '.claude'),
+  pi: process.env.PI_CODING_AGENT_DIR ?? path.join(home(), '.pi', 'agent'),
+  xdgData: process.env.XDG_DATA_HOME ?? path.join(home(), '.local', 'share'),
+  hermes: process.env.HERMES_HOME ?? path.join(home(), '.hermes'),
+  codex: process.env.CODEX_HOME ?? path.join(home(), '.codex'),
+  // the China edition and the international edition (WorkBuddy AI) are separate apps with separate homes
+  workbuddy: process.env.WORKBUDDY_HOME ?? path.join(home(), '.workbuddy'),
+  workbuddyAi: process.env.WORKBUDDY_AI_HOME ?? path.join(home(), '.workbuddy-ai'),
+})
+/** the layout of a machine's home directory, as mirrored from a node */
+export const mirrorRoots = (homeDir: string): Roots => ({
+  claude: path.join(homeDir, '.claude'), pi: path.join(homeDir, '.pi', 'agent'),
+  xdgData: path.join(homeDir, '.local', 'share'), hermes: path.join(homeDir, '.hermes'),
+  codex: path.join(homeDir, '.codex'), workbuddy: path.join(homeDir, '.workbuddy'), workbuddyAi: path.join(homeDir, '.workbuddy-ai'),
+})

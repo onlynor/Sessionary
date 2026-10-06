@@ -64,3 +64,15 @@ export async function resolveProject(cwd: string | undefined): Promise<ProjectRe
   cache.set(cwd, { at: Date.now(), ref })
   return ref
 }
+
+/**
+ * Project of a session recorded on another machine. Nothing on this machine says whether that directory or its
+ * git root exists, so the name comes from the path alone: the last segment, except for home directories.
+ */
+export async function resolveRemoteProject(cwd: string | undefined): Promise<ProjectRef> {
+  if (!cwd) return { key: 'none', name: 'No directory', exists: false, generic: true }
+  const dir = cwd.replace(/\\/g, '/').replace(/\/+$/, '') || '/'
+  if (dir === '/' || dir === '/root' || /^\/home\/[^/]+$/.test(dir) || /^\/Users\/[^/]+$/.test(dir))
+    return { key: 'generic:' + dir, name: dir === '/' ? dir : 'Home', exists: true, generic: true }
+  return { key: dir, name: dir.split('/').filter(Boolean).pop() ?? dir, exists: true, generic: false }
+}

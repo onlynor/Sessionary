@@ -4,14 +4,14 @@ import type { Block, Message, SessionSummary } from './model.ts'
 export type ToolKind = 'shell' | 'read' | 'edit' | 'write' | 'search' | 'web' | 'task' | 'todo' | 'other'
 
 const KINDS: Record<string, ToolKind> = {
-  bash: 'shell', shell: 'shell', exec: 'shell', powershell: 'shell',
+  bash: 'shell', shell: 'shell', exec: 'shell', powershell: 'shell', exec_command: 'shell', local_shell: 'shell', 'container.exec': 'shell', write_stdin: 'shell',
   read: 'read', view: 'read', ls: 'read', list: 'read',
   edit: 'edit', multiedit: 'edit', patch: 'edit', apply_patch: 'edit', notebookedit: 'edit',
   write: 'write',
   grep: 'search', glob: 'search', find: 'search', search: 'search',
-  webfetch: 'web', websearch: 'web', fetch: 'web',
+  webfetch: 'web', websearch: 'web', fetch: 'web', web_search: 'web', view_image: 'read',
   task: 'task', agent: 'task',
-  todowrite: 'todo', todoread: 'todo', todo: 'todo',
+  todowrite: 'todo', todoread: 'todo', todo: 'todo', update_plan: 'todo',
 }
 
 export const toolKind = (name: string): ToolKind => KINDS[name.toLowerCase()] ?? 'other'

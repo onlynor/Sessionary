@@ -6,6 +6,9 @@ import { test } from 'node:test'
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'sessionary-'))
 process.env.CLAUDE_CONFIG_DIR = path.join(tmp, 'claude')
+process.env.CODEX_HOME = path.join(tmp, 'codex-none')
+process.env.WORKBUDDY_HOME = path.join(tmp, 'workbuddy-none')
+process.env.WORKBUDDY_AI_HOME = path.join(tmp, 'workbuddy-ai-none')
 process.env.PI_CODING_AGENT_DIR = path.join(tmp, 'pi')
 process.env.XDG_DATA_HOME = path.join(tmp, 'xdg') // no opencode db there → adapter must degrade to empty
 

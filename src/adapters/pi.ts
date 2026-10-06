@@ -3,66 +3,72 @@ import path from 'node:path'
 import { assertIdle, moveAll, moveBack, type MovedEntry } from '../core/fsmove.ts'
 import type { AgentAdapter, Block, Message, Session, Source } from '../core/model.ts'
 import { cleanPrompt, derive, fallbackTitle, pickTitle } from '../core/derive.ts'
-import { argSafe, home, jsonlLines, toMs } from '../core/util.ts'
+import { argSafe, jsonlLines, localRoots, toMs, type Roots } from '../core/util.ts'
 
 // ~/.pi/agent/sessions/<encoded-cwd>/<timestamp>_<uuid>.jsonl
 // Header line {type:"session", id, cwd}; then tree entries {id, parentId, type:"message"|"model_change"|...}.
 // A tool call lives in an assistant message (toolCall block); its result is a separate `toolResult` message.
 // The tree can fork; we render the path from the last entry back to the root (the active branch).
 
-const root = () => path.join(process.env.PI_CODING_AGENT_DIR ?? path.join(home(), '.pi', 'agent'), 'sessions')
+export const makePi = (roots: () => Roots = localRoots): AgentAdapter => {
+  const root = () => path.join(roots().pi, 'sessions')
+  return {
+    id: 'pi',
+    label: 'Pi',
+    bin: 'pi',
 
-export const pi: AgentAdapter = {
-  id: 'pi',
-  label: 'Pi',
-
-  async listSources() {
-    const out: Source[] = []
-    let dirs
-    try { dirs = await fs.readdir(root(), { withFileTypes: true }) } catch { return out }
-    for (const d of dirs) {
-      if (!d.isDirectory()) continue
-      for (const f of await fs.readdir(path.join(root(), d.name)).catch(() => [])) {
-        if (!f.endsWith('.jsonl')) continue
-        const file = path.join(root(), d.name, f)
-        const st = await fs.stat(file).catch(() => null)
-        if (st) out.push({ key: file, ref: file, fingerprint: `${st.size}:${Math.floor(st.mtimeMs)}` })
+    async listSources() {
+      const out: Source[] = []
+      let dirs
+      try { dirs = await fs.readdir(root(), { withFileTypes: true }) } catch { return out }
+      for (const d of dirs) {
+        if (!d.isDirectory()) continue
+        for (const f of await fs.readdir(path.join(root(), d.name)).catch(() => [])) {
+          if (!f.endsWith('.jsonl')) continue
+          const file = path.join(root(), d.name, f)
+          const st = await fs.stat(file).catch(() => null)
+          if (st) out.push({ key: file, ref: file, fingerprint: `${st.size}:${Math.floor(st.mtimeMs)}` })
+        }
       }
-    }
-    return out
-  },
+      return out
+    },
 
-  async summarize(source) {
-    const s = await parse(source)
-    if (!s) return null
-    const { messages, ...summary } = s
-    return summary
-  },
-  load: (source) => parse(source),
+    async summarize(source) {
+      const s = await parse(source)
+      if (!s) return null
+      const { messages, ...summary } = s
+      return summary
+    },
+    load: (source) => parse(source),
 
-  // A Pi session is exactly one file.
-  async remove(source, backupDir) {
-    await assertIdle([source.ref])
-    return { entries: await moveAll([source.ref], backupDir) }
-  },
-  async restore(manifest) {
-    await moveBack(manifest.entries as MovedEntry[])
-  },
+    // A Pi session is exactly one file.
+    async remove(source, backupDir) {
+      await assertIdle([source.ref])
+      return { entries: await moveAll([source.ref], backupDir) }
+    },
+    async restore(manifest) {
+      await moveBack(manifest.entries as MovedEntry[])
+    },
 
-  storage() { return { path: root(), watch: [{ path: root(), recursive: true }] } },
-  resumeCommand(source, session) {
-    return { bin: process.env.SESSIONARY_PI_BIN ?? 'pi', args: ['--session', source.ref], cwd: session.cwd ?? '' }
-  },
+    storage() { return { path: root(), watch: [{ path: root(), recursive: true }] } },
+    newCommand(cwd) {
+      return { bin: process.env.SESSIONARY_PI_BIN ?? 'pi', args: [], cwd }
+    },
+    resumeCommand(source, session) {
+      return { bin: process.env.SESSIONARY_PI_BIN ?? 'pi', args: ['--session', source.ref], cwd: session.cwd ?? '' }
+    },
 
-  // read-only = Pi's own documented allowlist of non-mutating tools
-  continueCommand(source, session, prompt, { allowWrite }) {
-    return {
-      bin: process.env.SESSIONARY_PI_BIN ?? 'pi',
-      args: ['--session', source.ref, '-p', ...(allowWrite ? [] : ['--tools', 'read,grep,find,ls']), argSafe(prompt)],
-      cwd: session.cwd ?? '',
-    }
-  },
+    // read-only = Pi's own documented allowlist of non-mutating tools
+    continueCommand(source, session, prompt, { allowWrite }) {
+      return {
+        bin: process.env.SESSIONARY_PI_BIN ?? 'pi',
+        args: ['--session', source.ref, '-p', ...(allowWrite ? [] : ['--tools', 'read,grep,find,ls']), argSafe(prompt)],
+        cwd: session.cwd ?? '',
+      }
+    },
+  }
 }
+export const pi = makePi()
 
 function text(content: any): string {
   if (typeof content === 'string') return content

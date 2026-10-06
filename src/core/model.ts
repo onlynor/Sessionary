@@ -71,6 +71,8 @@ export interface Source {
 export interface AgentAdapter {
   id: string
   label: string
+  /** the program name the agent is started with, to find it on a machine and read its version */
+  bin: string
   /** Enumerate sources cheaply (stat / one light query). */
   listSources(): Promise<Source[]>
   summarize(source: Source): Promise<SessionSummary | null>
@@ -86,6 +88,8 @@ export interface AgentAdapter {
    * `allowWrite: false` must map to the agent's read-only mode.
    */
   continueCommand?(source: Source, session: SessionSummary, prompt: string, opts: { allowWrite: boolean }): ContinueCommand
+  /** Optional: the agent's interactive command that starts a fresh session in `cwd` (run in a terminal). */
+  newCommand?(cwd: string): LaunchCommand
   /** Optional: the agent's interactive command that reopens exactly this session (run in a terminal). */
   resumeCommand?(source: Source, session: SessionSummary): LaunchCommand
   /** Where the agent keeps its history; watched for live updates and shown when nothing is found. */

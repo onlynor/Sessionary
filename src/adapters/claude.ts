@@ -3,85 +3,91 @@ import path from 'node:path'
 import { assertIdle, exists, moveAll, moveBack, type MovedEntry } from '../core/fsmove.ts'
 import { RemovalError, type AgentAdapter, type Block, type Message, type Session, type Source } from '../core/model.ts'
 import { cleanPrompt, derive, fallbackTitle, pickTitle } from '../core/derive.ts'
-import { argSafe, home, jsonlLines, toMs } from '../core/util.ts'
+import { argSafe, jsonlLines, localRoots, toMs, type Roots } from '../core/util.ts'
 
 // ~/.claude/projects/<encoded-cwd>/<sessionId>.jsonl
 // ~/.claude/projects/<encoded-cwd>/<sessionId>/subagents/agent-<id>.jsonl (+ .meta.json)
 // One JSON record per line. An assistant API message is split over several records (one content block each)
 // sharing message.id; tool results come back as `user` records carrying tool_result blocks.
 
-const root = () => path.join(process.env.CLAUDE_CONFIG_DIR ?? path.join(home(), '.claude'), 'projects')
-
 async function readdir(dir: string) {
   try { return await fs.readdir(dir, { withFileTypes: true }) } catch { return [] }
 }
 
-export const claude: AgentAdapter = {
-  id: 'claude-code',
-  label: 'Claude Code',
+export const makeClaude = (roots: () => Roots = localRoots): AgentAdapter => {
+  const root = () => path.join(roots().claude, 'projects')
+  return {
+    id: 'claude-code',
+    label: 'Claude Code',
+    bin: 'claude',
 
-  async listSources() {
-    const out: Source[] = []
-    const add = async (file: string) => {
-      try {
-        const st = await fs.stat(file)
-        out.push({ key: file, ref: file, fingerprint: `${st.size}:${Math.floor(st.mtimeMs)}` })
-      } catch { /* vanished */ }
-    }
-    for (const proj of await readdir(root())) {
-      if (!proj.isDirectory()) continue
-      const dir = path.join(root(), proj.name)
-      for (const e of await readdir(dir)) {
-        if (e.isFile() && e.name.endsWith('.jsonl')) await add(path.join(dir, e.name))
-        else if (e.isDirectory()) {
-          for (const s of await readdir(path.join(dir, e.name, 'subagents')))
-            if (s.isFile() && s.name.endsWith('.jsonl')) await add(path.join(dir, e.name, 'subagents', s.name))
+    async listSources() {
+      const out: Source[] = []
+      const add = async (file: string) => {
+        try {
+          const st = await fs.stat(file)
+          out.push({ key: file, ref: file, fingerprint: `${st.size}:${Math.floor(st.mtimeMs)}` })
+        } catch { /* vanished */ }
+      }
+      for (const proj of await readdir(root())) {
+        if (!proj.isDirectory()) continue
+        const dir = path.join(root(), proj.name)
+        for (const e of await readdir(dir)) {
+          if (e.isFile() && e.name.endsWith('.jsonl')) await add(path.join(dir, e.name))
+          else if (e.isDirectory()) {
+            for (const s of await readdir(path.join(dir, e.name, 'subagents')))
+              if (s.isFile() && s.name.endsWith('.jsonl')) await add(path.join(dir, e.name, 'subagents', s.name))
+          }
         }
       }
-    }
-    return out
-  },
+      return out
+    },
 
-  async summarize(source) {
-    const s = await parse(source)
-    if (!s) return null
-    const { messages, ...summary } = s
-    return summary
-  },
-  load: (source) => parse(source),
+    async summarize(source) {
+      const s = await parse(source)
+      if (!s) return null
+      const { messages, ...summary } = s
+      return summary
+    },
+    load: (source) => parse(source),
 
-  // A Claude Code session is its transcript plus a few per-session folders keyed by the same id.
-  async remove(source, backupDir) {
-    const file = source.ref
-    if (path.basename(file).startsWith('agent-')) throw new RemovalError('unsupported', 'Sub-agent transcripts are removed together with their parent session.')
-    const id = path.basename(file, '.jsonl')
-    const configDir = path.dirname(root())
-    const candidates = [file, path.join(path.dirname(file), id), ...['file-history', 'session-env', 'tasks', 'todos'].map((d) => path.join(configDir, d, id))]
-    const present = []
-    for (const c of candidates) if (await exists(c)) present.push(c)
-    await assertIdle([file])
-    return { entries: await moveAll(present, backupDir) }
-  },
-  async restore(manifest) {
-    await moveBack(manifest.entries as MovedEntry[])
-  },
+    // A Claude Code session is its transcript plus a few per-session folders keyed by the same id.
+    async remove(source, backupDir) {
+      const file = source.ref
+      if (path.basename(file).startsWith('agent-')) throw new RemovalError('unsupported', 'Sub-agent transcripts are removed together with their parent session.')
+      const id = path.basename(file, '.jsonl')
+      const configDir = path.dirname(root())
+      const candidates = [file, path.join(path.dirname(file), id), ...['file-history', 'session-env', 'tasks', 'todos'].map((d) => path.join(configDir, d, id))]
+      const present = []
+      for (const c of candidates) if (await exists(c)) present.push(c)
+      await assertIdle([file])
+      return { entries: await moveAll(present, backupDir) }
+    },
+    async restore(manifest) {
+      await moveBack(manifest.entries as MovedEntry[])
+    },
 
-  storage() { return { path: root(), watch: [{ path: root(), recursive: true }] } },
-  // interactive: Claude Code finds transcripts by working directory, so it has to start in the session's cwd
-  resumeCommand(_source, session) {
-    return { bin: process.env.SESSIONARY_CLAUDE_BIN ?? 'claude', args: ['--resume', session.nativeId], cwd: session.cwd ?? '' }
-  },
+    storage() { return { path: root(), watch: [{ path: root(), recursive: true }] } },
+    // interactive: Claude Code finds transcripts by working directory, so it has to start in the session's cwd
+    newCommand(cwd) {
+      return { bin: process.env.SESSIONARY_CLAUDE_BIN ?? 'claude', args: [], cwd }
+    },
+    resumeCommand(_source, session) {
+      return { bin: process.env.SESSIONARY_CLAUDE_BIN ?? 'claude', args: ['--resume', session.nativeId], cwd: session.cwd ?? '' }
+    },
 
-  // `claude -p --resume` appends to the same transcript (verified); `plan` is Claude Code's read-only mode.
-  continueCommand(source, session, prompt, { allowWrite }) {
-    return {
-      bin: process.env.SESSIONARY_CLAUDE_BIN ?? 'claude',
-      args: ['-p', argSafe(prompt), '--resume', session.nativeId, '--permission-mode', allowWrite ? 'acceptEdits' : 'plan', '--output-format', 'stream-json', '--verbose'],
-      cwd: session.cwd ?? '',
-      sessionIdFrom: (line) => { try { const id = JSON.parse(line)?.session_id; return typeof id === 'string' ? `claude-code:${id}` : undefined } catch { return undefined } },
-    }
-  },
+    // `claude -p --resume` appends to the same transcript (verified); `plan` is Claude Code's read-only mode.
+    continueCommand(source, session, prompt, { allowWrite }) {
+      return {
+        bin: process.env.SESSIONARY_CLAUDE_BIN ?? 'claude',
+        args: ['-p', argSafe(prompt), '--resume', session.nativeId, '--permission-mode', allowWrite ? 'acceptEdits' : 'plan', '--output-format', 'stream-json', '--verbose'],
+        cwd: session.cwd ?? '',
+        sessionIdFrom: (line) => { try { const id = JSON.parse(line)?.session_id; return typeof id === 'string' ? `claude-code:${id}` : undefined } catch { return undefined } },
+      }
+    },
+  }
 }
+export const claude = makeClaude()
 
 const COMMAND_RE = /<command-name>([^<]*)<\/command-name>/
 const SYSTEM_NOISE = ['<local-command-caveat>', '<local-command-stdout>', '<local-command-stderr>', '<system-reminder>']
