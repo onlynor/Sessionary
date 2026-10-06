@@ -1,0 +1,290 @@
+import { spawn } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
+import { AcpDriver } from './acp.ts'
+import { ClaudeDriver } from './claude.ts'
+import { CodexDriver } from './codex.ts'
+import { PiDriver } from './pi.ts'
+import {
+  ChatError, type ChatCaps, type ChatDriver, type ChatEvent, type ChatInfo, type ChatSend, type ChatState, type Proc, type SpawnSpec, type Spawner, type StoredEvent,
+} from './types.ts'
+
+/** the agents that can be chatted with, and the protocol each one speaks */
+export const CHAT_AGENTS = ['claude-code', 'codex', 'opencode', 'pi', 'hermes'] as const
+export type ChatAgent = (typeof CHAT_AGENTS)[number]
+export const chatSupported = (agent: string): agent is ChatAgent => (CHAT_AGENTS as readonly string[]).includes(agent)
+
+export const PROTOCOL: Record<ChatAgent, string> = { 'claude-code': 'stream-json', codex: 'app-server', opencode: 'ACP', pi: 'rpc', hermes: 'ACP' }
+
+const LOG_MAX = Number(process.env.SESSIONARY_CHAT_LOG_MAX ?? 3000)
+const IDLE_MS = Number(process.env.SESSIONARY_CHAT_IDLE_MS ?? 30 * 60_000)
+const MAX_CHATS = Number(process.env.SESSIONARY_CHAT_MAX ?? 12)
+
+export interface OpenRequest {
+  agent: ChatAgent
+  /** a machine id: 'local' or a node */
+  machine: string
+  cwd?: string
+  /** the agent's own id for the session to continue (what its resume command takes) */
+  resume?: string
+  /** the Sessionary id of the session this continues, so the page can find the chat again */
+  sessionKey?: string
+  model?: string
+  mode?: string
+  effort?: string
+  title?: string
+}
+
+export interface ChatSummary {
+  id: string
+  agent: ChatAgent
+  machine: string
+  cwd?: string
+  sessionKey?: string
+  sessionId?: string
+  title?: string
+  state: ChatState
+  info: ChatInfo
+  startedAt: number
+  lastAt: number
+  lastSeq: number
+  error?: string
+  /** how many approvals and questions are waiting for the person */
+  pending: number
+  /** the last assistant text, for notices and lists */
+  preview?: string
+  /** how long the last turn took, for deciding whether its end is worth a notice */
+  lastTurnMs?: number
+}
+
+interface Chat {
+  id: string
+  req: OpenRequest
+  driver: ChatDriver
+  state: ChatState
+  info: ChatInfo
+  log: StoredEvent[]
+  seq: number
+  subs: Set<(e: StoredEvent) => void>
+  startedAt: number
+  lastAt: number
+  error?: string
+  pending: Set<string>
+  working: boolean
+  preview?: string
+  turnAt?: number
+  lastTurnMs?: number
+  toolIdx: Map<string, StoredEvent>
+  listeners: number
+}
+
+export interface ChatHooks {
+  /** a chat changed in a way the page lists or notifies about (state, title, a request waiting) */
+  changed?: (c: ChatSummary, why: 'state' | 'approval' | 'turn-end' | 'closed' | 'info') => void
+}
+
+export interface ChatsOptions {
+  /** how to start a process for a machine ('local' runs it here, a node's id over ssh) */
+  spawnFor: (machine: string) => Spawner
+  /** the program that is run for an agent on a machine */
+  binFor?: (agent: ChatAgent, machine: string) => string
+  /** swap a driver for a test */
+  driverFor?: (req: OpenRequest, emit: (e: ChatEvent) => void, spawner: Spawner) => ChatDriver | undefined
+  hooks?: ChatHooks
+}
+
+/** local processes; the environment is the person's own, with what the protocol needs added */
+export const localSpawner: Spawner = (s: SpawnSpec): Proc => spawn(s.bin, s.args, { cwd: s.cwd, env: { ...process.env, ...s.env }, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true }) as unknown as Proc
+
+const DEFAULT_BIN: Record<ChatAgent, string> = { 'claude-code': 'claude', codex: 'codex', opencode: 'opencode', pi: 'pi', hermes: 'hermes' }
+const ENV_BIN: Record<ChatAgent, string> = { 'claude-code': 'SESSIONARY_CLAUDE_BIN', codex: 'SESSIONARY_CODEX_BIN', opencode: 'SESSIONARY_OPENCODE_BIN', pi: 'SESSIONARY_PI_BIN', hermes: 'SESSIONARY_HERMES_BIN' }
+export const localBin = (agent: ChatAgent) => process.env[ENV_BIN[agent]] ?? DEFAULT_BIN[agent]
+
+/**
+ * Live conversations. Each chat is a process on the agent's official protocol that the server keeps while the page is
+ * closed, with a numbered log of what happened so a page that opens (or reconnects) late catches up from the
+ * log instead of from the process. The log is compacted as it goes: finished text replaces its deltas, and a tool
+ * keeps one entry holding its latest state.
+ */
+export class Chats {
+  private chats = new Map<string, Chat>()
+  private sweeper?: NodeJS.Timeout
+  constructor(private o: ChatsOptions) {
+    this.sweeper = setInterval(() => this.sweep(), Math.max(1000, Math.min(60_000, IDLE_MS / 4)))
+    this.sweeper.unref?.()
+  }
+
+  list(machine?: string): ChatSummary[] { return [...this.chats.values()].filter((c) => !machine || c.req.machine === machine).map((c) => this.summary(c)) }
+  get(id: string): ChatSummary | undefined { const c = this.chats.get(id); return c && this.summary(c) }
+  /** the live chat that continues a session, if there is one */
+  forSession(machine: string, agent: string, key: string): ChatSummary | undefined {
+    const c = [...this.chats.values()].find((x) => x.state !== 'closed' && x.req.machine === machine && x.req.agent === agent && this.keyOf(x) === key)
+    return c && this.summary(c)
+  }
+
+  /** the Sessionary id of the session this chat is writing (known once the agent has said what it is) */
+  private keyOf(c: Chat): string | undefined {
+    const n = c.info.nativeId ?? c.info.sessionId
+    return c.req.sessionKey ?? (n ? `${c.req.agent}:${n}` : undefined)
+  }
+  private summary(c: Chat): ChatSummary {
+    return {
+      id: c.id, agent: c.req.agent, machine: c.req.machine, cwd: c.req.cwd, sessionKey: this.keyOf(c), sessionId: c.info.sessionId, title: c.req.title,
+      state: c.state, info: c.info, startedAt: c.startedAt, lastAt: c.lastAt, lastSeq: c.seq, error: c.error, pending: c.pending.size, preview: c.preview, lastTurnMs: c.lastTurnMs,
+    }
+  }
+
+  async open(req: OpenRequest): Promise<ChatSummary> {
+    if (!chatSupported(req.agent)) throw new ChatError('This agent cannot be chatted with from Sessionary.', 'unsupported')
+    const existing = req.sessionKey ? this.forSession(req.machine, req.agent, req.sessionKey) : undefined
+    if (existing) return existing
+    if ([...this.chats.values()].filter((c) => c.state !== 'closed').length >= MAX_CHATS) throw new ChatError(`At most ${MAX_CHATS} chats can run at once; close one first.`, 'busy')
+
+    const id = randomUUID().slice(0, 12)
+    const chat: Chat = {
+      id, req, state: 'starting', info: { agent: req.agent, cwd: req.cwd }, log: [], seq: 0, subs: new Set(), startedAt: Date.now(), lastAt: Date.now(),
+      pending: new Set(), working: false, toolIdx: new Map(), listeners: 0, driver: undefined as unknown as ChatDriver,
+    }
+    const emit = (e: ChatEvent) => this.record(chat, e)
+    const spawner = this.o.spawnFor(req.machine)
+    const bin = this.o.binFor?.(req.agent, req.machine) ?? (req.machine === 'local' ? localBin(req.agent) : DEFAULT_BIN[req.agent])
+    const driver = this.o.driverFor?.(req, emit, spawner) ?? this.makeDriver(req, bin, emit, spawner)
+    chat.driver = driver
+    ;(driver as { onEnd?: (e?: string) => void }).onEnd = (error) => {
+      chat.error = error ?? chat.error
+      this.setState(chat, 'closed')
+      this.o.hooks?.changed?.(this.summary(chat), 'closed')
+    }
+    this.chats.set(id, chat)
+    try { await driver.start() } catch (e) {
+      this.chats.delete(id)
+      try { await driver.close() } catch { /* already gone */ }
+      throw e instanceof ChatError ? e : new ChatError((e as Error).message, 'failed')
+    }
+    if (chat.state === 'starting') this.setState(chat, 'idle')
+    return this.summary(chat)
+  }
+
+  private makeDriver(req: OpenRequest, bin: string, emit: (e: ChatEvent) => void, spawner: Spawner): ChatDriver {
+    const common = { spawn: spawner, bin, cwd: req.cwd, resume: req.resume, model: req.model }
+    switch (req.agent) {
+      case 'claude-code': return new ClaudeDriver({ ...common, mode: req.mode }, emit)
+      case 'codex': return new CodexDriver({ ...common, mode: req.mode, effort: req.effort }, emit)
+      case 'opencode': return new AcpDriver({ ...common, agent: 'opencode', args: ['acp'], mode: req.mode }, emit)
+      case 'hermes': return new AcpDriver({ ...common, agent: 'hermes', args: ['acp'], mode: req.mode }, emit)
+      case 'pi': return new PiDriver({ ...common, effort: req.effort }, emit)
+    }
+  }
+
+  // ---- the log ----
+  private record(c: Chat, e: ChatEvent) {
+    c.lastAt = Date.now()
+    if (e.t === 'info') {
+      c.info = { ...c.info, ...Object.fromEntries(Object.entries(e.info).filter(([, v]) => v !== undefined)) } as ChatInfo
+      if (e.info.caps) c.info.caps = { ...c.info.caps, ...e.info.caps } as Partial<ChatCaps>
+      if (e.info.sessionId && e.info.sessionId !== c.req.resume) this.o.hooks?.changed?.(this.summary(c), 'info')
+    }
+    if (e.t === 'turn' && e.state === 'start') { c.turnAt ??= Date.now(); c.working = true; if (c.pending.size === 0) this.setState(c, 'working') }
+    if (e.t === 'turn' && e.state === 'end') { c.lastTurnMs = c.turnAt ? Date.now() - c.turnAt : undefined; c.turnAt = undefined; c.working = false; c.pending.clear(); this.setState(c, 'idle') }
+    if (e.t === 'approval' || e.t === 'question') { c.pending.add(e.id); this.setState(c, 'waiting'); this.o.hooks?.changed?.(this.summary(c), 'approval') }
+    if ((e.t === 'approval.done' || e.t === 'question.done') && c.pending.delete(e.id) && c.pending.size === 0) this.setState(c, c.working ? 'working' : 'idle')
+    if (e.t === 'text.end' && e.text.trim()) c.preview = e.text.trim().slice(0, 240)
+
+    const se = { ...e, seq: ++c.seq, at: Date.now() } as StoredEvent
+    // compaction: a finished block replaces its deltas, a tool keeps one entry
+    if (e.t === 'text.end' || e.t === 'thinking.end') {
+      const delta = e.t === 'text.end' ? 'text' : 'thinking'
+      c.log = c.log.filter((x) => !(x.t === delta && (x as { id: string }).id === e.id))
+    }
+    if (e.t === 'tool') {
+      const prev = c.toolIdx.get(e.id)
+      if (prev) {
+        const i = c.log.indexOf(prev)
+        if (i >= 0) { c.log[i] = se; c.toolIdx.set(e.id, se); this.fan(c, se); return }
+      }
+      c.toolIdx.set(e.id, se)
+    }
+    if (e.t === 'info') {
+      // only the newest `info` matters to a late reader
+      const i = c.log.findIndex((x) => x.t === 'info')
+      if (i >= 0) { c.log[i] = { ...se, info: c.info } as StoredEvent; this.fan(c, se); return }
+    }
+    c.log.push(se)
+    if (c.log.length > LOG_MAX) {
+      const drop = c.log.length - Math.floor(LOG_MAX * 0.8)
+      const kept = c.log.slice(drop)
+      for (const x of c.log.slice(0, drop)) if (x.t === 'tool') c.toolIdx.delete(x.id)
+      // an `info` entry survives however old it is
+      const info = c.log.slice(0, drop).find((x) => x.t === 'info')
+      c.log = info ? [info, ...kept] : kept
+    }
+    this.fan(c, se)
+  }
+  private fan(c: Chat, e: StoredEvent) { for (const f of c.subs) { try { f(e) } catch { /* a dead reader */ } } }
+
+  private setState(c: Chat, s: ChatState) {
+    if (c.state === s || (c.state === 'closed' && s !== 'closed')) return
+    c.state = s
+    this.fan(c, { t: 'status', state: s, seq: ++c.seq, at: Date.now() })
+    if (s === 'idle' && c.working === false) this.o.hooks?.changed?.(this.summary(c), 'turn-end')
+    else this.o.hooks?.changed?.(this.summary(c), 'state')
+  }
+
+  /** events after `after` (0 for everything), then each new one until the returned function is called */
+  subscribe(id: string, after: number, fn: (e: StoredEvent) => void): (() => void) | undefined {
+    const c = this.chats.get(id)
+    if (!c) return
+    for (const e of c.log.filter((x) => x.seq > after)) fn(e)
+    fn({ t: 'status', state: c.state, seq: c.seq, at: Date.now() })
+    c.subs.add(fn)
+    c.listeners++
+    return () => { c.subs.delete(fn); c.listeners-- ; c.lastAt = Date.now() }
+  }
+
+  private need(id: string): Chat {
+    const c = this.chats.get(id)
+    if (!c) throw new ChatError('No such chat.', 'unavailable')
+    if (c.state === 'closed') throw new ChatError(c.error ?? 'This chat has ended.', 'unavailable')
+    return c
+  }
+
+  async send(id: string, m: ChatSend) {
+    const c = this.need(id)
+    if (!m.text.trim() && !m.images?.length) throw new ChatError('The message is empty.', 'failed')
+    if (c.working && c.info.caps?.steer === false) throw new ChatError('The agent is still working; wait for it to finish or interrupt it.', 'busy')
+    this.record(c, { t: 'user', id: randomUUID().slice(0, 8), text: m.text, ...(c.working && { queued: true }) })
+    if (!c.working) { c.working = true; this.setState(c, 'working') }
+    try { await c.driver.send(m) } catch (e) {
+      // the message did not reach the agent
+      c.working = c.state === 'working' && c.pending.size > 0
+      if (!c.working) this.setState(c, 'idle')
+      throw e instanceof ChatError ? e : new ChatError((e as Error).message, 'failed')
+    }
+  }
+  async interrupt(id: string) { await this.need(id).driver.interrupt() }
+  async respond(id: string, approval: string, option: string) { await this.need(id).driver.respond(approval, option) }
+  async answer(id: string, question: string, answers: Record<string, string[]>) { await this.need(id).driver.answer(question, answers) }
+  async setModel(id: string, model: string) { await this.need(id).driver.setModel(model) }
+  async setMode(id: string, mode: string) { await this.need(id).driver.setMode(mode) }
+  async setEffort(id: string, effort: string) { await this.need(id).driver.setEffort(effort) }
+
+  async close(id: string) {
+    const c = this.chats.get(id)
+    if (!c) return
+    if (c.state !== 'closed') { this.setState(c, 'closed'); await c.driver.close().catch(() => {}) }
+    // keep a finished chat's log for a minute so a page that is still open can show how it ended
+    setTimeout(() => this.chats.delete(id), 60_000).unref?.()
+  }
+
+  /** chats nobody is watching and nothing is happening in go away; a person's work is never cut off */
+  private sweep() {
+    const now = Date.now()
+    for (const c of this.chats.values()) {
+      if (c.state === 'idle' && c.listeners === 0 && now - c.lastAt > IDLE_MS) this.close(c.id).catch(() => {})
+    }
+  }
+
+  async stopAll() {
+    if (this.sweeper) clearInterval(this.sweeper)
+    await Promise.all([...this.chats.keys()].map((id) => this.close(id)))
+  }
+}
