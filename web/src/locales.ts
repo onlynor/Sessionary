@@ -527,6 +527,7 @@ const ROWS: [string, string, string, string][] = [
   ['The machine did not answer', '机器没有响应', '機器沒有回應', 'マシンが応答しません'],
   ['Kernel', '内核', '核心', 'カーネル'],
   ['Uptime', '运行时间', '運行時間', '稼働時間'],
+  ['Operating system', '操作系统', '作業系統', 'OS'],
   ['Load average', '平均负载', '平均負載', '平均負荷'],
   ['Agent processes', 'Agent 进程', 'Agent 行程', 'エージェントのプロセス'],
   ['No agent is running on this machine right now.', '这台机器上现在没有运行任何 Agent。', '這台機器上現在沒有執行任何 Agent。', 'このマシンでは現在エージェントは動いていません。'],

@@ -46,7 +46,7 @@ export function MonitorTab() {
           {swapPct != null && system.swap!.total > 0 && <Gauge label="Swap" value={swapPct} sub={`${fmtBytes(system.swap!.used)} / ${fmtBytes(system.swap!.total)}`} />}
         </div>
         <dl className="kv group-card node-kv mon-facts">
-          <dt>{t('System')}</dt><dd>{system.os || '—'}</dd>
+          <dt>{t('Operating system')}</dt><dd>{system.os || '—'}</dd>
           {system.kernel && <><dt>{t('Kernel')}</dt><dd>{system.kernel} · {system.arch}</dd></>}
           <dt>{t('Uptime')}</dt><dd>{fmtUptime(system.uptime)}</dd>
           {system.load && <><dt>{t('Load average')}</dt><dd className="mono">{system.load.map((n) => n.toFixed(2)).join('  ')}</dd></>}
