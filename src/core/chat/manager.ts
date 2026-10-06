@@ -90,12 +90,12 @@ export interface ChatsOptions {
   /** swap a driver for a test */
   driverFor?: (req: OpenRequest, emit: (e: ChatEvent) => void, spawner: Spawner) => ChatDriver | undefined
   /** what an agent is started with besides what its protocol needs: its model routing (control/agents.ts) */
-  launchFor?: (agent: ChatAgent, machine: string) => { env: Record<string, string>; args: string[] } | undefined
+  launchFor?: (agent: ChatAgent, machine: string) => Promise<{ env: Record<string, string>; args: string[]; secret?: { name: string; value: string }; tunnel?: { remotePort: number; localPort: number }; release?: () => void } | undefined>
   hooks?: ChatHooks
 }
 
 /** local processes; the environment is the person's own, with what the protocol needs added */
-export const localSpawner: Spawner = (s: SpawnSpec): Proc => spawn(s.bin, s.args, { cwd: s.cwd, env: { ...process.env, ...s.env }, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true }) as unknown as Proc
+export const localSpawner: Spawner = (s: SpawnSpec): Proc => spawn(s.bin, s.args, { cwd: s.cwd, env: { ...process.env, ...s.env, ...(s.secret && { [s.secret.name]: s.secret.value }) }, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true }) as unknown as Proc
 
 const DEFAULT_BIN: Record<ChatAgent, string> = { 'claude-code': 'claude', codex: 'codex', opencode: 'opencode', pi: 'pi', hermes: 'hermes' }
 const ENV_BIN: Record<ChatAgent, string> = { 'claude-code': 'SESSIONARY_CLAUDE_BIN', codex: 'SESSIONARY_CODEX_BIN', opencode: 'SESSIONARY_OPENCODE_BIN', pi: 'SESSIONARY_PI_BIN', hermes: 'SESSIONARY_HERMES_BIN' }
@@ -135,7 +135,8 @@ export class Chats {
     }
   }
 
-  async open(req: OpenRequest): Promise<ChatSummary> {
+  /** `attempt`: a node's random tunnel port was taken, so the chat is opened once more on another (see below) */
+  async open(req: OpenRequest, attempt = 0): Promise<ChatSummary> {
     if (!chatSupported(req.agent)) throw new ChatError('This agent cannot be chatted with from Sessionary.', 'unsupported')
     const existing = req.sessionKey ? this.forSession(req.machine, req.agent, req.sessionKey) : undefined
     if (existing) return existing
@@ -148,9 +149,14 @@ export class Chats {
     }
     const emit = (e: ChatEvent) => this.record(chat, e)
     const base = this.o.spawnFor(req.machine)
-    const extra = this.o.launchFor?.(req.agent, req.machine)
-    // the routing's arguments go first, so a model picked in the chat itself still has the last word
-    const spawner: Spawner = extra ? (s) => base({ ...s, args: [...extra.args, ...s.args], env: { ...s.env, ...extra.env } }) : base
+    const extra = await this.o.launchFor?.(req.agent, req.machine)
+    // the routing's arguments go first, so a model picked in the chat itself still has the last word; a node's door
+    // closes when the process does, however it ends
+    const spawner: Spawner = extra ? (s) => {
+      const p = base({ ...s, args: [...extra.args, ...s.args], env: { ...s.env, ...extra.env }, ...(extra.secret && { secret: extra.secret }), ...(extra.tunnel && { tunnel: extra.tunnel }) })
+      if (extra.release) { p.on('close', extra.release); p.on('error', extra.release) }
+      return p
+    } : base
     const bin = this.o.binFor?.(req.agent, req.machine) ?? (req.machine === 'local' ? localBin(req.agent) : DEFAULT_BIN[req.agent])
     const driver = this.o.driverFor?.(req, emit, spawner) ?? this.makeDriver(req, bin, emit, spawner)
     chat.driver = driver
@@ -162,7 +168,10 @@ export class Chats {
     this.chats.set(id, chat)
     try { await driver.start() } catch (e) {
       this.chats.delete(id)
+      extra?.release?.() // nothing may have been started to close it
       try { await driver.close() } catch { /* already gone */ }
+      // the port picked on the node for the tunnel was in use: another launch picks another port (and a new door)
+      if (extra?.tunnel && attempt === 0 && /remote port forwarding failed/i.test((e as Error).message)) return this.open(req, 1)
       throw e instanceof ChatError ? e : new ChatError((e as Error).message, 'failed')
     }
     if (chat.state === 'starting') this.setState(chat, 'idle')

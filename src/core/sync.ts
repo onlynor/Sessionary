@@ -34,14 +34,36 @@ export class SyncError extends Error {}
 const controlDir = () => path.join(os.tmpdir(), `sessionary-ssh-${os.userInfo().uid}`)
 
 /** Arguments for one non-interactive ssh call. The destination follows `--`, so it can never be read as an option. */
-export function sshArgs(t: SshTarget, command: string[]): string[] {
+/**
+ * A port on the node that leads back to this computer for as long as the ssh process lives (`ssh -R`): how an agent
+ * started on a node reaches the gateway here (see control/agents.ts).
+ */
+export interface Tunnel { remotePort: number; localPort: number }
+
+/**
+ * A secret for the program on the node travels inside the SSH connection, as an environment variable sshd accepts by
+ * default (`AcceptEnv LC_*` on Debian and Ubuntu), so it is never on a command line on either machine. On the node,
+ * `secretPrelude` moves it to the name the program reads; if sshd did not accept it, the program is not started.
+ */
+export const SECRET_VAR = 'LC_SESSIONARY_TOKEN'
+export const SECRET_MISSING = 97
+export function secretPrelude(name: string): string {
+  if (!/^[A-Z_][A-Z0-9_]*$/.test(name)) throw new Error(`not an environment variable name: ${name}`)
+  return `[ -n "\${${SECRET_VAR}:-}" ] || { echo "Sessionary: this node's SSH server did not pass the session's gateway token (it needs AcceptEnv LC_*), so the agent was not started." >&2; exit ${SECRET_MISSING}; }; export ${name}="\$${SECRET_VAR}"; unset ${SECRET_VAR}; `
+}
+
+export function sshArgs(t: SshTarget, command: string[], o: { tunnel?: Tunnel; sendSecret?: boolean } = {}): string[] {
   return [
     '-T',
     '-o', 'BatchMode=yes', // a password prompt nobody can answer would hang
     '-o', 'ConnectTimeout=10',
     '-o', 'ServerAliveInterval=15', '-o', 'ServerAliveCountMax=3',
+    // A tunnel gets a connection of its own, so it closes with the session; asked through a shared one it would stay
+    // on the master after the session ended. A port already taken on the node is an error, not a silent no-tunnel.
+    ...(o.sendSecret ? ['-o', `SendEnv=${SECRET_VAR}`] : []),
+    ...(o.tunnel ? ['-o', 'ControlMaster=no', '-o', 'ControlPath=none', '-o', 'ExitOnForwardFailure=yes', '-R', `127.0.0.1:${o.tunnel.remotePort}:127.0.0.1:${o.tunnel.localPort}`] : []),
     // one connection serves every call for a while; Windows' OpenSSH has no multiplexing
-    ...(process.platform === 'win32' ? [] : ['-o', 'ControlMaster=auto', '-o', `ControlPath=${controlDir()}/%C`, '-o', 'ControlPersist=120']),
+    ...(process.platform === 'win32' || o.tunnel ? [] : ['-o', 'ControlMaster=auto', '-o', `ControlPath=${controlDir()}/%C`, '-o', 'ControlPersist=120']),
     ...(t.port ? ['-p', String(t.port)] : []),
     ...(t.identity ? ['-i', t.identity] : []),
     '--', `${t.user ? `${t.user}@` : ''}${t.host}`,
@@ -308,13 +330,19 @@ const size = (z?: Partial<TermSize>) => ({ cols: Math.max(20, Math.min(500, Math
  * size is set before the shell starts (a later resize is not forwarded). With `run`, the agent's command runs in
  * a login shell so the node's PATH applies, in `cwd`; without it the person gets that shell.
  */
-export function sshTerminalSpec(t: SshTarget, o: { cwd?: string; run?: { bin: string; args: string[] }; size?: Partial<TermSize> }): { bin: string; args: string[] } {
+export function sshTerminalSpec(t: SshTarget, o: { cwd?: string; run?: { bin: string; args: string[] }; size?: Partial<TermSize>; env?: Record<string, string>; secret?: { name: string; value: string }; tunnel?: Tunnel }): { bin: string; args: string[]; env?: Record<string, string> } {
   const { cols, rows } = size(o.size)
   const shell = '"${SHELL:-/bin/sh}"'
+  // what the program is started with goes through `env`, replacing the shell, so it is not left in a process's arguments
+  const env = Object.entries(o.env ?? {}).map(([k, v]) => `${k}=${v}`)
   const inner = o.run
-    ? `${o.cwd ? `cd ${posix(o.cwd)} && ` : ''}${[o.run.bin, ...o.run.args].map(posix).join(' ')}`
+    ? `${o.secret ? secretPrelude(o.secret.name) : ''}${o.cwd ? `cd ${posix(o.cwd)} && ` : ''}${env.length ? 'exec env ' + env.map(posix).join(' ') + ' ' : ''}${[o.run.bin, ...o.run.args].map(posix).join(' ')}`
     : undefined
   const start = inner ? `exec ${shell} -lic ${posix(inner)}` : `${o.cwd ? `cd ${posix(o.cwd)} 2>/dev/null; ` : ''}exec ${shell} -l`
   const remote = `stty cols ${cols} rows ${rows} 2>/dev/null; ${start}`
-  return { bin: process.env.SESSIONARY_SSH_BIN ?? 'ssh', args: sshArgs(t, [remote]).map((a) => (a === '-T' ? '-tt' : a)) }
+  const secret = !!(o.secret && inner)
+  return {
+    bin: process.env.SESSIONARY_SSH_BIN ?? 'ssh', args: sshArgs(t, [remote], { tunnel: o.tunnel, sendSecret: secret }).map((a) => (a === '-T' ? '-tt' : a)),
+    ...(secret && { env: { [SECRET_VAR]: o.secret!.value } }),
+  }
 }

@@ -91,3 +91,68 @@ test('textDiff shows only what changed, with context', () => {
   const d = textDiff('f', 'a\nb\nc', 'a\nB\nc')
   assert.ok(d.includes('-b') && d.includes('+B') && d.includes(' a'))
 })
+
+/** a chat whose launch hands out a door: how many times the door was released */
+const withDoor = () => {
+  let released = 0
+  return { count: () => released, launchFor: async () => ({ env: {}, args: [], release: () => { released++ } }) }
+}
+
+test('a chat releases its door when it is closed', async () => {
+  const door = withDoor()
+  const chats = new Chats({ spawnFor: () => localSpawner, binFor: () => fakeClaude(), launchFor: door.launchFor })
+  const ch = await chats.open({ agent: 'claude-code', machine: 'local', cwd: tmpdir() })
+  assert.equal(door.count(), 0)
+  await chats.close(ch.id)
+  await until(() => door.count() >= 1)
+  await new Promise((r) => setTimeout(r, 200))
+  assert.equal(door.count(), 1, 'released once, however many ways the process reported its end')
+})
+
+test('a chat that cannot start releases its door', async () => {
+  const door = withDoor()
+  const chats = new Chats({ spawnFor: () => localSpawner, binFor: () => '/nonexistent/claude', launchFor: door.launchFor })
+  await assert.rejects(chats.open({ agent: 'claude-code', machine: 'local', cwd: tmpdir() }))
+  await until(() => door.count() >= 1)
+  await chats.stopAll()
+})
+
+test('an agent that dies on its own releases its door', async () => {
+  // answers the handshake, then exits on the first message as if it crashed
+  const dir = mkdtempSync(join(tmpdir(), 'dying-claude-'))
+  const bin = join(dir, 'claude')
+  writeFileSync(bin, `#!/usr/bin/env node
+require('readline').createInterface({ input: process.stdin }).on('line', (l) => {
+  const o = JSON.parse(l)
+  if (o.type === 'control_request') return process.stdout.write(JSON.stringify({ type: 'control_response', response: { subtype: 'success', request_id: o.request_id, response: {} } }) + '\\n')
+  if (o.type === 'user') process.exit(3)
+})
+`)
+  chmodSync(bin, 0o755)
+  const door = withDoor()
+  const chats = new Chats({ spawnFor: () => localSpawner, binFor: () => bin, launchFor: door.launchFor })
+  const ch = await chats.open({ agent: 'claude-code', machine: 'local', cwd: tmpdir() })
+  await chats.send(ch.id, { text: 'hello' }).catch(() => {})
+  await until(() => chats.get(ch.id)!.state === 'closed' && door.count() === 1)
+  await chats.stopAll()
+})
+
+test('a node chat whose tunnel port was taken is opened once more on another port, then gives up', async () => {
+  let launches = 0, released = 0, starts = 0
+  const failTimes = (n: number) => new Chats({
+    spawnFor: () => localSpawner,
+    launchFor: async () => { launches++; return { env: {}, args: [], tunnel: { remotePort: 20000 + launches, localPort: 1 }, release: () => { released++ } } },
+    driverFor: () => ({ start: async () => { if (++starts <= n) throw new Error(`Claude Code did not start: Error: remote port forwarding failed for listen port ${20000 + starts}`) }, close: async () => {} }) as never,
+  })
+  const ok = failTimes(1)
+  const ch = await ok.open({ agent: 'claude-code', machine: 'vps', cwd: '/tmp' })
+  assert.equal(ch.state, 'idle')
+  assert.deepEqual([launches, released], [2, 1], 'a fresh launch (port and door) for the second try; the first door closed')
+  await ok.stopAll()
+
+  launches = 0; released = 0; starts = 0
+  const no = failTimes(2)
+  await assert.rejects(no.open({ agent: 'claude-code', machine: 'vps', cwd: '/tmp' }), /remote port forwarding failed/)
+  assert.deepEqual([launches, released], [2, 2], 'tried twice, both doors closed')
+  await no.stopAll()
+})

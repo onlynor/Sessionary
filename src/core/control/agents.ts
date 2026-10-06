@@ -129,27 +129,32 @@ export function agentModelState(agent: string, roots: Roots = localRoots(), gate
 }
 
 /** what a bound agent is started with: added to its environment and its command line */
-export interface LaunchProfile { env: Record<string, string>; args: string[] }
+/**
+ * What a bound agent is started with. `secret` is the one value that grants use of the gateway: kept apart from `env`
+ * so that on a node it can travel inside the SSH connection (SendEnv) instead of on a command line, where anyone on
+ * the node could read it. On this computer it is simply part of the environment.
+ */
+export interface LaunchProfile { env: Record<string, string>; args: string[]; secret: { name: string; value: string } }
 
 /**
- * `gateway` is the gateway's base address (`http://127.0.0.1:4777/gateway`), `key` the gateway key; the agent's
- * id is appended to the key so the gateway knows who is asking.
+ * `gateway` is the gateway's base address (`http://127.0.0.1:4777/gateway`), `key` what opens it for this agent (the
+ * gateway key with the agent's id appended here; a session's own token on a node).
  */
 export function launchProfile(agent: string, target: string, gateway: string, key: string): LaunchProfile | undefined {
-  const k = `${key}.${agent}`
   switch (agent) {
     case 'claude-code':
       return {
         env: {
-          ANTHROPIC_BASE_URL: gateway, ANTHROPIC_AUTH_TOKEN: k, ANTHROPIC_MODEL: target,
+          ANTHROPIC_BASE_URL: gateway, ANTHROPIC_MODEL: target,
           // Claude Code's helper requests (titles, summaries) and its tier aliases go the same way
           ANTHROPIC_SMALL_FAST_MODEL: target, ANTHROPIC_DEFAULT_HAIKU_MODEL: target, ANTHROPIC_DEFAULT_SONNET_MODEL: target, ANTHROPIC_DEFAULT_OPUS_MODEL: target,
         },
         args: ['--model', target],
+        secret: { name: 'ANTHROPIC_AUTH_TOKEN', value: key },
       }
     case 'codex':
       return {
-        env: { SESSIONARY_GATEWAY_KEY: k },
+        env: {},
         args: [
           '-c', 'model_provider="sessionary"',
           '-c', 'model_providers.sessionary.name="Sessionary"',
@@ -158,16 +163,19 @@ export function launchProfile(agent: string, target: string, gateway: string, ke
           '-c', 'model_providers.sessionary.wire_api="responses"',
           '-c', `model=${JSON.stringify(target)}`,
         ],
+        secret: { name: 'SESSIONARY_GATEWAY_KEY', value: key },
       }
     case 'opencode':
       return {
         env: {
+          // OpenCode reads the key from the environment itself ({env:…}), so the configuration holds no secret
           OPENCODE_CONFIG_CONTENT: JSON.stringify({
-            provider: { sessionary: { npm: '@ai-sdk/openai-compatible', name: 'Sessionary', options: { baseURL: gateway + '/v1', apiKey: k }, models: { [target]: { name: target } } } },
+            provider: { sessionary: { npm: '@ai-sdk/openai-compatible', name: 'Sessionary', options: { baseURL: gateway + '/v1', apiKey: '{env:SESSIONARY_GATEWAY_KEY}' }, models: { [target]: { name: target } } } },
             model: `sessionary/${target}`,
           }),
         },
         args: [],
+        secret: { name: 'SESSIONARY_GATEWAY_KEY', value: key },
       }
   }
   return undefined

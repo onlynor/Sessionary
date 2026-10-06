@@ -1,7 +1,10 @@
-import type { Context, Hono } from 'hono'
+import { type Context, Hono } from 'hono'
+import { getRequestListener } from '@hono/node-server'
+import { randomBytes } from 'node:crypto'
+import http from 'node:http'
 import { agentModelState, launchProfile, PROTOCOL_OF, ROUTABLE, snippet, type LaunchProfile } from './agents.ts'
 import { detectMagpie, listModels, mergeModels } from './catalog.ts'
-import { createGateway, type RouteEvent, Router } from './gateway.ts'
+import { createGateway, type RouteEvent, Router, sameSecret } from './gateway.ts'
 import { PRESETS, presetOf } from './presets.ts'
 import { ControlError, type ControlStore, type Group, maskKey, MODEL_RE, PROTOCOLS, type Protocol, type Provider, slug, validEndpoint, type UsageRow } from './store.ts'
 
@@ -13,6 +16,10 @@ export interface ControlOptions {
   store: ControlStore
   /** where agents reach the gateway, e.g. `http://127.0.0.1:4777/gateway` */
   gatewayBase: () => string
+  /** a port on a node for one session's tunnel (tests pick their own) */
+  pickPort?: () => number
+  /** a node reached over ssh: its sessions can get a tunnel back to the gateway */
+  sshNode?: (machine: string) => boolean
   broadcast: (event: string, data: unknown) => void
 }
 
@@ -48,6 +55,19 @@ export function summarize(rows: UsageRow[]) {
   }
 }
 
+/** a port for one session's tunnel on a node: random in a range services rarely use, so two sessions do not collide */
+export const tunnelPort = () => 20_000 + Math.floor(Math.random() * 30_000)
+
+/** how a bound agent is started: its profile, and on a node the tunnel and the door it leads to */
+export interface Launch extends LaunchProfile {
+  tunnel?: { remotePort: number; localPort: number }
+  /** closes the session's door; call it when the session's process has ended (safe to call more than once) */
+  release?: () => void
+}
+
+/** A session's own way into the gateway: a listener on this computer's loopback that only that session's token opens. */
+export interface Door { port: number; token: string; close: () => void }
+
 export function registerControl(app: Hono, o: ControlOptions) {
   const { store } = o
   const router = new Router(store)
@@ -59,6 +79,35 @@ export function registerControl(app: Hono, o: ControlOptions) {
   }
   app.route('/gateway', createGateway({ store, router, emit }))
   store.pruneUsage()
+
+  /**
+   * A door for one session on a node. Its tunnel leads here and nowhere else: not to the app (whose page token would
+   * give whatever runs on the node everything the page can do) and not to the gateway key, which never leaves this
+   * computer. The token is the session's own and dies with the door, so one read on the node (a process listing, a
+   * node whose sshd publishes forwarded ports) is worth at most this session, for as long as it runs.
+   */
+  const doors = new Set<Door>()
+  const openDoor = async (agent: string): Promise<Door> => {
+    const token = `sk-sessionary-session-${randomBytes(24).toString('base64url')}`
+    const app = new Hono()
+    app.route('/gateway', createGateway({ store, router, emit, authorize: (key) => (sameSecret(key, token) ? agent : null) }))
+    app.all('*', (c) => c.json({ error: { message: 'Only the gateway answers here.' } }, 404))
+    const server = http.createServer(getRequestListener(app.fetch))
+    await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve) })
+    let open = true
+    const door: Door = {
+      port: (server.address() as { port: number }).port, token,
+      close: () => {
+        if (!open) return
+        open = false
+        doors.delete(door)
+        server.close()
+        server.closeAllConnections() // a reply still streaming ends with the session
+      },
+    }
+    doors.add(door)
+    return door
+  }
 
   const fail = (c: Context, e: unknown) => (e instanceof ControlError ? c.json({ error: e.message }, e.status) : c.json({ error: (e as Error).message }, 500))
   const body = async (c: Context): Promise<any> => (await c.req.json().catch(() => ({}))) ?? {}
@@ -209,11 +258,25 @@ export function registerControl(app: Hono, o: ControlOptions) {
     return c.json(summarize(store.usage(since)))
   })
 
-  /** what Sessionary adds when it starts this agent itself (a terminal, a chat); nothing when it is not bound */
-  const launchFor = (agent: string, machine: string): LaunchProfile | undefined => {
-    if (machine !== 'local') return undefined // the gateway listens on this computer only
+  /**
+   * What Sessionary adds when it starts this agent itself (a terminal, a chat); nothing when it is not bound. On this
+   * computer that is the gateway and its key. On an ssh node the session's own ssh connection carries a tunnel from
+   * a port on the node's loopback to a door opened for this session alone; the caller must `release` it when the
+   * session's process ends, however it ends.
+   */
+  const launchFor = async (agent: string, machine: string): Promise<Launch | undefined> => {
     const target = store.binding(agent)?.target
-    return target ? launchProfile(agent, target, o.gatewayBase(), store.gatewayKey()) : undefined
+    if (!target) return undefined
+    if (machine === 'local') {
+      const p = launchProfile(agent, target, o.gatewayBase(), `${store.gatewayKey()}.${agent}`)
+      // here the key is just part of the environment the process is started with
+      return p && { ...p, env: { ...p.env, [p.secret.name]: p.secret.value } }
+    }
+    if (!o.sshNode?.(machine) || !launchProfile(agent, target, '', '')) return undefined
+    const door = await openDoor(agent)
+    const tunnel = { remotePort: (o.pickPort ?? tunnelPort)(), localPort: door.port }
+    const p = launchProfile(agent, target, `http://127.0.0.1:${tunnel.remotePort}/gateway`, door.token)!
+    return { ...p, tunnel, release: door.close }
   }
-  return { router, launchFor }
+  return { router, launchFor, doors: () => doors.size, closeDoors: () => { for (const d of [...doors]) d.close() } }
 }

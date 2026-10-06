@@ -1,5 +1,5 @@
 import { Hono, type Context } from 'hono'
-import { randomBytes } from 'node:crypto'
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import { type ControlStore, type Protocol, type Provider, resolveKey } from './store.ts'
 
 /**
@@ -183,12 +183,22 @@ export interface GatewayOptions {
   emit?: (e: RouteEvent) => void
   /** how long to wait for an upstream's headers (a reply that does not stream comes all at once) */
   headersTimeoutMs?: number
+  /** who a key belongs to, in place of the gateway key (a session's own door accepts only its own token) */
+  authorize?: (key: string, ua: string) => string | null
+}
+
+/** compares two secrets in time that does not depend on where they differ */
+export function sameSecret(a: string, b: string): boolean {
+  const h = (s: string) => createHash('sha256').update(s).digest()
+  return timingSafeEqual(h(a), h(b)) && a.length === b.length
 }
 
 /** which agent is asking: the key's suffix (`<key>.<agent>`) set when Sessionary starts it, else its user agent */
 export function callerOf(key: string, gatewayKey: string, ua: string): string | null {
-  if (key !== gatewayKey && !key.startsWith(gatewayKey + '.')) return null
-  const named = key.slice(gatewayKey.length + 1)
+  // gateway keys are base64url, so the first '.' is where the agent's name starts
+  const dot = key.indexOf('.')
+  if (!sameSecret(dot < 0 ? key : key.slice(0, dot), gatewayKey)) return null
+  const named = dot < 0 ? '' : key.slice(dot + 1)
   if (named) return named
   const u = ua.toLowerCase()
   return u.includes('claude') ? 'claude-code' : u.includes('codex') ? 'codex' : u.includes('opencode') ? 'opencode' : u.includes('hermes') ? 'hermes' : u.includes('pi-coding') ? 'pi' : 'other'
@@ -212,7 +222,8 @@ export function createGateway(o: GatewayOptions) {
   const auth = (c: Context) => {
     const bearer = /^Bearer\s+(.+)$/i.exec(c.req.header('authorization') ?? '')?.[1]
     const key = (bearer ?? c.req.header('x-api-key') ?? c.req.header('x-goog-api-key') ?? '').trim()
-    return key ? callerOf(key, store.gatewayKey(), c.req.header('user-agent') ?? '') : null
+    if (!key) return null
+    return o.authorize ? o.authorize(key, c.req.header('user-agent') ?? '') : callerOf(key, store.gatewayKey(), c.req.header('user-agent') ?? '')
   }
 
   gw.get('/v1/models', (c) => {

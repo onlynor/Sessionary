@@ -62,7 +62,8 @@ export class Terminals {
   onExit?: (info: TermInfo) => void
   constructor(private max = 12) {}
 
-  create(meta: TermMeta, spec: SpawnSpec): TermInfo {
+  /** `onEnd` is told once when the process has ended, however it ended (exit, signal, failure to start) */
+  create(meta: TermMeta, spec: SpawnSpec, onEnd?: () => void): TermInfo {
     const running = [...this.terms.values()].filter((t) => t.info.state === 'running').length
     if (running >= this.max) throw new TerminalError(`At most ${this.max} terminals can run at once. Close one first.`)
     const proc = spawn(spec.bin, spec.args, {
@@ -92,6 +93,7 @@ export class Terminals {
     const finish = (code: number | null) => {
       if (done) return
       done = true
+      try { onEnd?.() } catch { /* the terminal's own bookkeeping goes on */ }
       info.state = 'exited'; info.exitCode = code; info.endedAt = Date.now()
       for (const s of term.subs) s.exit({ ...info })
       if (!term.killed) this.onExit?.({ ...info })

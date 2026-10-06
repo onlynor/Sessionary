@@ -49,7 +49,8 @@ read-only; Sessionary's own state lives in a separate folder.
   refuses its key or is down. The Routing page draws each decision live; Usage shows tokens per day, model, agent and
   route, from the gateway or from the agents' own session files. A Magpie gateway on the same machine can be added as one
   provider. Agents' configuration files are never edited: a choice applies to the sessions Sessionary starts (terminal and
-  chat), through their environment and arguments; *Set up by hand* gives a snippet for anything else.
+  chat), through their environment and arguments — on this computer and on SSH nodes, where the session's own SSH
+  connection carries a tunnel back to the gateway; *Set up by hand* gives a snippet for anything else.
 - **Desktop-class UI.** Collapsible, resizable panes, light/dark/graphite themes, comfortable or compact lists, keyboard
   navigation, touch and narrow-window layouts, and English, 简体中文, 繁體中文 and 日本語.
 
@@ -151,6 +152,13 @@ open them, so the agents' files stay the single source of truth.
 - **The gateway** answers on the same loopback port, needs its own key (`Bearer` or `x-api-key`), refuses requests carrying
   a non-loopback `Origin`, and never shows API keys to the page (they are masked; `env:NAME` reads a key from the
   environment instead of storing it).
+- **On a node**, each session gets its own *door*: a loopback listener on this computer that serves the gateway and
+  nothing else, opened only by a token made for that session. The session's own SSH connection carries the tunnel
+  (`ssh -R`, a random port on the node's loopback, its own connection, `ExitOnForwardFailure`). The token travels inside
+  that connection (`SendEnv` of an `LC_*` variable, which sshd accepts by default), so it is never on a command line on
+  either machine; a node whose sshd refuses it does not start the agent. The gateway key never leaves this computer.
+  When the session ends — closed, cancelled, the agent crashing, SSH dropping, or failing to start — its door closes,
+  so a token read on the node is worth that session alone, while it runs. A taken port is retried once on another.
 - **Opening things** is confined to the session's own directory; resume and terminal commands run through your login
   shell in that directory.
 

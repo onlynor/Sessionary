@@ -56,7 +56,7 @@ function AgentsTab() {
                   <span className={`ac-dot ${state === 'desktop' ? 'available' : state}`} />
                   {state === 'available' || state === 'desktop' ? t('Available') : state === 'history' ? t('Not found on PATH') : state === 'missing' ? t('Not installed') : t('Checking…')}
                 </div>
-                {machine.kind === 'local' && <AgentRoute agent={a.id} control={control} />}
+                {machine.kind !== 'url' && <AgentRoute agent={a.id} control={control} here={machine.kind === 'local'} />}
                 <div className="agent-nums">
                   <div><b>{a.sessionCount}</b><span>{t('Sessions')}</span></div>
                   <div><b>{nProjects}</b><span>{t('Projects')}</span></div>
@@ -88,15 +88,18 @@ function AgentsTab() {
   )
 }
 
-/** which model a routable agent is started on from Sessionary, and the way to change it */
-function AgentRoute({ agent, control }: { agent: string; control: ReturnType<typeof useControl> }) {
+/**
+ * which model a routable agent is started on from Sessionary, and the way to change it; on an ssh node the same
+ * binding applies (through a tunnel), but what the agent is set to by itself is only known for this computer
+ */
+function AgentRoute({ agent, control, here }: { agent: string; control: ReturnType<typeof useControl>; here: boolean }) {
   const a = control.state?.agents.find((x) => x.agent === agent)
   if (!a) return null
   const d = a.target ? describeTarget(control.state, a.target) : undefined
   return (
     <a className="ac-route" href={href.routing()} title={t('Choose the model on Routing')}>
       {a.target ? <TargetMark target={a.target} size={16} /> : <Icon name="route" size={13} />}
-      <span className="ellip">{d ? <><b>{d.title}</b> · {t('through the gateway')}</> : a.via === 'magpie' ? t('Its own setting, through Magpie') : t('Its own model setting')}</span>
+      <span className="ellip">{d ? <><b>{d.title}</b> · {t('through the gateway')}</> : here && a.via === 'magpie' ? t('Its own setting, through Magpie') : t('Its own model setting')}</span>
       <Icon name="chev" size={11} />
     </a>
   )

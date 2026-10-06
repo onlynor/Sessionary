@@ -73,7 +73,7 @@ export function GatewayPage() {
           {(Object.entries(state.gateway.protocols) as [Protocol, string][]).map(([p, path]) => (
             <div key={p} className="form-row"><span>{PROTOCOL_NAME[p]}</span><span className="mono ellip quiet">POST {base}{path}</span></div>
           ))}
-          <p className="form-hint flat">{t('Listens on 127.0.0.1 only, and refuses requests from web pages on other sites. The key is sent as Bearer or x-api-key.')}</p>
+          <p className="form-hint flat">{t('Listens on 127.0.0.1 only, and refuses requests from web pages on other sites. The key is sent as Bearer or x-api-key. A session started on an SSH node reaches it through a tunnel in that session’s own connection, which leads to the gateway alone.')}</p>
         </div>
 
         <div className="section-label row-label"><span>{t('Connecting agents')}</span><span className="grow" /><a className="more" href={href.routing()}>{t('Choose models on Routing')}</a></div>

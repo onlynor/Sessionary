@@ -563,7 +563,7 @@ export function createApp(store: IndexStore, webRoot?: string, overlay: OverlayS
   }
   if (!opts.readOnly) {
     // ---- Model Control: providers, routing groups, which agent uses what, and the gateway agents are pointed at ----
-    const control = registerControl(app, { store: opts.control ?? new ControlStore(':memory:'), gatewayBase: () => `http://127.0.0.1:${opts.port ?? 4777}/gateway`, broadcast })
+    const control = registerControl(app, { store: opts.control ?? new ControlStore(':memory:'), gatewayBase: () => `http://127.0.0.1:${opts.port ?? 4777}/gateway`, broadcast, sshNode: (id) => nodes.list().some((n) => n.id === id && n.kind === 'ssh') })
     app.get('/api/machines', (c) => c.json([
       { id: 'local', name: 'Localhost', kind: 'local', state: 'online', host: os.hostname(), platform: process.platform, at: 0 },
       ...nodes.list(),
@@ -629,7 +629,8 @@ export function createApp(store: IndexStore, webRoot?: string, overlay: OverlayS
         run = cmd; cwd = cmd.cwd || cwd
         const row = node ? undefined : store.get(sessionId)
         meta.title = overlay.titles().get(sessionId) ?? row?.summary.title ?? 'Session'
-        meta.agent ??= row?.agent; meta.cwd = cwd
+        // a node's sessions are not in this computer's index; their id still starts with the agent's
+        meta.agent ??= row?.agent ?? (sessionId.includes(':') ? sessionId.slice(0, sessionId.indexOf(':')) : undefined); meta.cwd = cwd
       } else if (kind === 'new') {
         const a = localAdapters.find((x) => x.id === agent)
         if (!a?.newCommand) throw new NodeError('This agent cannot be started from Sessionary.', 400)
@@ -637,15 +638,18 @@ export function createApp(store: IndexStore, webRoot?: string, overlay: OverlayS
         run = { bin: node ? (cmd.bin.split('/').pop() ?? cmd.bin) : cmd.bin, args: cmd.args }
         meta.title = `${a.label} · ${cwd?.split('/').filter(Boolean).pop() ?? 'new session'}`
       }
-      // a bound agent started here goes through the gateway: its routing is added to how it is started
-      const extra = run && meta.agent ? control.launchFor(meta.agent, machine) : undefined
+      // a bound agent started here goes through the gateway: its routing is added to how it is started; on a node
+      // that includes a door of its own, which must close when the terminal's process ends (or never starts)
+      const extra = run && meta.agent ? await control.launchFor(meta.agent, machine) : undefined
       if (run && extra) run = { bin: run.bin, args: [...extra.args, ...run.args] }
-      if (!node) {
-        if (cwd && !existsSync(cwd)) cwd = undefined
-        return terminals.create(meta, localTerminalSpec({ cwd: cwd ?? os.homedir(), run, size, env: extra?.env }))
-      }
-      const spec = sshTerminalSpec(nodes.target(machine), { cwd, run, size })
-      return terminals.create(meta, ptyWrap(spec, size))
+      try {
+        if (!node) {
+          if (cwd && !existsSync(cwd)) cwd = undefined
+          return terminals.create(meta, localTerminalSpec({ cwd: cwd ?? os.homedir(), run, size, env: extra?.env }))
+        }
+        const spec = sshTerminalSpec(nodes.target(machine), { cwd, run, size, env: extra?.env, secret: extra?.secret, tunnel: extra?.tunnel })
+        return terminals.create(meta, ptyWrap(spec, size), extra?.release)
+      } catch (e) { extra?.release?.(); throw e }
     }
     app.get('/api/terminals', (c) => (authed(c) ? c.json(terminals.list(c.req.query('machine'))) : c.json({ error: 'Missing token.' }, 403)))
     app.post('/api/terminals', async (c) => {
@@ -710,7 +714,7 @@ export function createApp(store: IndexStore, webRoot?: string, overlay: OverlayS
         },
       },
     })
-    stopChats = () => chats.stopAll()
+    stopChats = async () => { await chats.stopAll(); control.closeDoors() }
     const chatErr = (c: Context, e: unknown) => {
       if (e instanceof ChatError) return c.json({ error: e.message, code: e.code }, e.code === 'busy' ? 409 : e.code === 'unsupported' ? 400 : e.code === 'unavailable' ? 410 : 502)
       if (e instanceof NodeError) return c.json({ error: e.message }, e.status as 400)

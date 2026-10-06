@@ -36,7 +36,7 @@ export function RoutingPage({ group: chosen }: { group?: string }) {
         <h1>{t('Routing')}</h1>
         <p className="page-lede">{t('Choose the model each agent uses. A routing group is several models an agent picks as one: when one cannot answer, the next one does.')}</p>
 
-        <div className="section-label row-label"><span>{t('Agents')}</span><span className="grow" /><span className="r-meta">{t('applies to sessions Sessionary starts on this computer')}</span></div>
+        <div className="section-label row-label"><span>{t('Agents')}</span><span className="grow" /><span className="r-meta">{t('applies to sessions Sessionary starts, here and on SSH nodes')}</span></div>
         {!state ? <div className="sk-line" /> : (
           <div className="group-card bind-list">
             {state.agents.map((a) => <AgentRow key={a.agent} a={a} />)}
