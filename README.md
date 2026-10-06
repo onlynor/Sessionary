@@ -2,8 +2,8 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md) | [繁體中文](README.zh-TW.md) | [日本語](README.ja.md)
 
-A local-first session manager for AI coding agents. Sessionary reads the history that **Claude Code**, **OpenCode** and
-**Pi** already keep on your disk, puts every session from every agent in one searchable list, and lets you pick any of
+A local-first session manager for AI coding agents. Sessionary reads the history that **Claude Code**, **Codex**, **OpenCode**,
+**Pi**, **Hermes** and **WorkBuddy** (China edition and WorkBuddy AI) already keep on your disk, puts every session from every agent in one searchable list, and lets you pick any of
 them back up — in your own terminal with the agent's real resume command, or with one more prompt from the browser.
 
 Nothing leaves your machine: there is no account, no cloud service and no telemetry. The agents' files are read
@@ -11,6 +11,9 @@ read-only; Sessionary's own state lives in a separate folder.
 
 ## Features
 
+- **Machines first.** Everything is organised as machine → agent → project → session. Your computer is one machine; add a VPS
+  or any server you can SSH into and it gets the same pages: its agents (with versions), projects, sessions, an in-app
+  terminal, and a live monitor (CPU, memory, disk, running agents).
 - **One list for every agent.** Sessions from Claude Code, OpenCode and Pi, normalised into one model, shown per agent or
   all together. Sort by last activity, start date, message count or title; group by date or project; narrow to pinned,
   active or file-editing sessions; scope to one project (git root, worktrees folded together).
@@ -28,6 +31,14 @@ read-only; Sessionary's own state lives in a separate folder.
   - *Continue here* sends one more prompt through the agent's headless CLI and streams the reply in — read-only by
     default.
   - Open the session's folder, a terminal there, or the folder or any file of it in your editor.
+- **Other machines (nodes).** Add a VPS or any machine you can `ssh` into and browse, search and read its Claude Code,
+  OpenCode, Pi and Hermes sessions next to your own, and resume one in a terminal here through SSH. Nothing is installed
+  on the node: Sessionary copies the history files over SSH (`find` + `tar`) and reads the copy. Hosts come from your
+  `~/.ssh/config`; login must be key-based.
+- **Notifications, sparingly.** The bell and the sidebar badge what needs you: an agent running in an app terminal that has gone
+  quiet or exited, a node that stays unreachable, a large copy that finished. Desktop notifications (opt-in) only come when the
+  page is in the background; there are switches per kind and *Pause for 1 hour*, nothing repeats within a cooldown, several
+  at once arrive as one, and a closed page is silent.
 - **Organise.** Pin sessions to the top. Hide sessions or individual messages (Sessionary-only Trash), or delete a session
   from the agent's storage with a backup that can be restored.
 - **Desktop-class UI.** Collapsible, resizable panes, light/dark/graphite themes, comfortable or compact lists, keyboard
@@ -103,6 +114,9 @@ Everything is optional; the defaults follow each agent's own conventions.
 | Claude Code | `~/.claude/projects/<cwd-encoded>/<id>.jsonl` | JSONL event log | One assistant message is split over records sharing `message.id`; tool results are `user` records; `cwd` / `gitBranch` on every record; sub-agents in `<id>/subagents/agent-*.jsonl`; title from `ai-title` / `custom-title` |
 | OpenCode | `$XDG_DATA_HOME/opencode/opencode.db` | SQLite (WAL); `session` / `message` / `part` with JSON `data` | `session.directory` + `project.worktree`; `parent_id` for sub-agents; tool call and result are one `tool` part; edit parts carry a unified diff |
 | Pi | `~/.pi/agent/sessions/<cwd-encoded>/<ts>_<id>.jsonl` | JSONL tree (`id` / `parentId`) | Header carries `cwd`; tool results are separate `toolResult` messages; `bashExecution` for `!cmd` |
+| Codex | `~/.codex/sessions/YYYY/MM/DD/rollout-<ts>-<id>.jsonl` | JSONL (`session_meta`, `response_item`, `event_msg`) | Thread names from `~/.codex/state_N.sqlite` / `session_index.jsonl`; `apply_patch` calls become diffs |
+| Hermes | `~/.hermes/state.db` | SQLite (`sessions`, `messages`) | Rewound messages (`active = 0`) are skipped |
+| WorkBuddy | `~/.workbuddy/projects/<project>/<session>.jsonl` (China) · `~/.workbuddy-ai/…` (international) | JSONL, CodeBuddy-style items | Desktop apps: history only, no resume command; the format is undocumented, so unknown lines are skipped |
 
 The index stores only summaries and searchable text. Full conversations are re-parsed from the original files when you
 open them, so the agents' files stay the single source of truth.
