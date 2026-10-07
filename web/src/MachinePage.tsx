@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { t, useT } from './i18n'
 import { AgentIcon } from './AgentIcon'
 import { launchTerminal } from './actions'
+import { startNewSession } from './NewSession'
 import { host } from './api'
 import { relAgo, relTime } from './format'
 import { Icon } from './Icon'
@@ -64,7 +65,7 @@ function AgentsTab() {
                 </div>
                 <div className="ac-actions">
                   <button className="btn" onClick={() => go(href.agent(machine.id, a.id))} disabled={!a.sessionCount && state !== 'available'}>{t('Open')}</button>
-                  <button className="btn primary" onClick={() => launchTerminal(ui.say, { machine: machine.id, kind: 'new', agent: a.id })} disabled={state !== 'available' || !a.canCreate} title={state !== 'available' ? t('This agent was not found on the machine') : t('Start a new {agent} session in a terminal', { agent: a.label })}><Icon name="other" size={13} />{t('New session')}</button>
+                  <button className="btn primary" onClick={() => startNewSession({ agent: a.id })} disabled={state !== 'available' || !a.canCreate} title={state !== 'available' ? t('This agent was not found on the machine') : t('Start a new {agent} session and talk to it here', { agent: a.label })}><Icon name="other" size={13} />{t('New session')}</button>
                 </div>
               </section>
             )

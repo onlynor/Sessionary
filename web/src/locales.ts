@@ -500,7 +500,7 @@ const ROWS: [string, string, string, string][] = [
   ['Installed', '已安装', '已安裝', 'インストール済み'],
   ['Not found on PATH', 'PATH 中找不到', 'PATH 中找不到', 'PATH に見つかりません'],
   ['Checking…', '正在检查…', '正在檢查…', '確認中…'],
-  ['Start a new {agent} session in a terminal', '在终端中启动新的 {agent} 会话', '在終端機中啟動新的 {agent} 工作階段', 'ターミナルで新しい {agent} セッションを開始'],
+  ['Start a new {agent} session and talk to it here', '新建 {agent} 会话，并在这里与它对话', '新增 {agent} 工作階段，並在這裡與它對話', '新しい {agent} セッションを開始して、ここで会話'],
   ['View sessions', '查看会话', '查看工作階段', 'セッションを見る'],
   ['Manage projects', '管理项目', '管理專案', 'プロジェクトを管理'],
   ['CPU, memory, processes', 'CPU、内存、进程', 'CPU、記憶體、行程', 'CPU・メモリ・プロセス'],
@@ -860,6 +860,16 @@ const ROWS: [string, string, string, string][] = [
   ['upstream error', '上游错误', '上游錯誤', '上流のエラー'],
   ['request refused', '请求被拒绝', '請求被拒絕', 'リクエストが拒否された'],
   ['cancelled', '已取消', '已取消', 'キャンセル'],
+
+  // ---- new session ----
+  ['Which agent should it be?', '要用哪个 Agent？', '要用哪個 Agent？', 'どのエージェントにしますか？'],
+  ['No agent that can start a session was found on this machine.', '这台机器上没有找到可以新建会话的 Agent。', '這台機器上沒有找到可以新增工作階段的 Agent。', 'このマシンにはセッションを開始できるエージェントが見つかりません。'],
+  ['Where should it work? The conversation opens right away.', '在哪个目录工作？对话会立即打开。', '在哪個目錄工作？對話會立即開啟。', 'どこで作業しますか？会話はすぐに開きます。'],
+  ['Another folder, e.g. ~/code/app', '其他目录，例如 ~/code/app', '其他目錄，例如 ~/code/app', '別のフォルダ（例: ~/code/app）'],
+  ['Another folder', '其他目录', '其他目錄', '別のフォルダ'],
+  ['Start', '开始', '開始', '開始'],
+  ['Its own terminal interface, in the folder typed above (or the home folder)', '它自己的终端界面，在上面填写的目录（或主目录）中运行', '它自己的終端介面，在上面填寫的目錄（或主目錄）中執行', 'エージェント自身のターミナル UI。上で入力したフォルダ（またはホームフォルダ）で動きます'],
+  ['Run {agent} in a terminal instead', '改为在终端中运行 {agent}', '改為在終端中執行 {agent}', '代わりに {agent} をターミナルで実行'],
 
   // ---- workspace ----
   ['Recent work', '最近的工作', '最近的工作', '最近の作業'],

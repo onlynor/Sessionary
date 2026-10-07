@@ -10,6 +10,8 @@ import { NO_PROJECT, projectKey, ProjectScope } from './ProjectScope'
 import { Popover } from './SettingsMenu'
 import { Snippet } from './Snippet'
 import { ToolbarSlot, ToolbarTools } from './ui'
+import { canChat, prewarmSession } from './chat'
+import { useMachine } from './machines'
 import type { Agent, SearchHit, SessionSummary } from './types'
 
 export type Sort = 'updated' | 'created' | 'messages' | 'title'
@@ -85,6 +87,14 @@ export function SessionList(p: Props) {
   const [viewMenu, setViewMenu] = useState<{ left: number; top: number; anchor: { top: number; bottom: number } }>()
   const filterRef = useRef<HTMLInputElement>(null)
   const agent = p.agent ?? ''
+  const { machine } = useMachine()
+  // a pointer resting on a session starts its agent, so opening it finds the chat ready (see prewarmSession)
+  const intent = useRef<ReturnType<typeof setTimeout>>(undefined)
+  useEffect(() => () => clearTimeout(intent.current), [])
+  const warmOn = (s: SessionSummary) => canChat(s.agent, machine.kind) && !s.parentId ? {
+    onPointerEnter: () => { clearTimeout(intent.current); intent.current = setTimeout(() => prewarmSession(machine.id, s.id), 260) },
+    onPointerLeave: () => clearTimeout(intent.current),
+  } : {}
 
   const own = useMemo(() => (agent ? sessions.filter((s) => s.agent === agent) : sessions), [sessions, agent])
   const scope = p.project ?? null
@@ -151,7 +161,7 @@ export function SessionList(p: Props) {
     </span>
   )
   const row = (s: SessionSummary) => (
-    <button key={s.id} className={`sx-entry ${menu?.s.id === s.id ? 'menu-target' : ''}`} onClick={() => p.onOpen(s)}
+    <button key={s.id} className={`sx-entry ${menu?.s.id === s.id ? 'menu-target' : ''}`} onClick={() => p.onOpen(s)} {...warmOn(s)}
       onContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, s }) }}
       title={[s.title, s.preview, fullTime(s.updatedAt)].filter(Boolean).join('\n\n')}>
       <span className={`sx-tile at-${s.agent}`}><AgentIcon agent={s.agent} size={17} /></span>
@@ -170,7 +180,7 @@ export function SessionList(p: Props) {
   )
   // a session being worked on now: a card with room for what it last said
   const liveCard = (s: SessionSummary) => (
-    <button key={s.id} className={`sx-live ${menu?.s.id === s.id ? 'menu-target' : ''}`} onClick={() => p.onOpen(s)}
+    <button key={s.id} className={`sx-live ${menu?.s.id === s.id ? 'menu-target' : ''}`} onClick={() => p.onOpen(s)} {...warmOn(s)}
       onContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, s }) }} title={fullTime(s.updatedAt)}>
       <span className="sx-live-head">
         <span className={`sx-tile at-${s.agent}`}><AgentIcon agent={s.agent} size={17} /></span>

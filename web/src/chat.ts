@@ -100,6 +100,11 @@ export function useChatStream(chat: Pick<ChatSummary, 'id' | 'agent' | 'info'> |
       if (!live) return s.close()
       es = s
       s.addEventListener('chat', (m) => { queue.push(JSON.parse((m as MessageEvent).data)); if (!raf) raf = requestAnimationFrame(flush) })
+      // the stream broke: a blip reconnects by itself (and replays from the last event); a chat the server no longer
+      // has (it was restarted) has ended, which lets a session page start its agent again
+      s.addEventListener('error', () => {
+        chatApi.get(id).catch((e) => { if (live && (e as { status?: number }).status === 404) { s.close(); setView((v) => ({ ...v, state: 'closed' })) } })
+      })
     }).catch(() => {})
     return () => { live = false; es?.close(); if (raf) cancelAnimationFrame(raf) }
   }, [id])
@@ -139,8 +144,20 @@ export const CHAT_AGENTS = ['claude-code', 'codex', 'opencode', 'pi', 'hermes']
 export const canChat = (agent: string, machineKind: 'local' | 'ssh' | 'url') => machineKind !== 'url' && CHAT_AGENTS.includes(agent)
 
 /**
- * One live chat on the page: found if the server already holds it, started when the box is focused or a message is
- * sent. `chatId` is for a chat that has no session yet (a new one); `sessionId` for continuing a session.
+ * Start a session's agent ahead of time (a pointer resting on it in a list): opening it then finds the agent up. The
+ * server keeps such chats few and lets unused ones go after a few minutes; starting costs no model tokens.
+ */
+const warmed = new Map<string, number>()
+export function prewarmSession(machine: string, sessionId: string) {
+  const key = `${machine}\u0000${sessionId}`
+  if (Date.now() - (warmed.get(key) ?? 0) < 60_000) return
+  warmed.set(key, Date.now())
+  chatApi.open({ machine, sessionId, warm: true }).catch(() => warmed.delete(key))
+}
+/**
+ * One live chat on the page: found if the server already holds it, and otherwise started as soon as the page opens
+ * (in the background — the history is already on screen, and anything typed meanwhile waits for the agent).
+ * `chatId` is for a chat that has no session yet (a new one); `sessionId` for continuing a session.
  */
 export function useLiveChat(o: { machine: string; agent: string; sessionId?: string; chatId?: string; enabled: boolean; say: (s: string) => void }) {
   const { machine, agent, sessionId, chatId, enabled, say } = o
@@ -160,19 +177,22 @@ export function useLiveChat(o: { machine: string; agent: string; sessionId?: str
   }, [chatId])
   useEffect(() => { opened.current = undefined; setError(undefined) }, [sessionId, chatId, machine])
 
-  /** the chat for this session, started if it is not running yet */
-  const ensure = useCallback(async (): Promise<ChatSummary> => {
+  /** the chat for this session, started if it is not running yet (the server answers at once either way) */
+  const ensure = useCallback(async (warm = false): Promise<ChatSummary> => {
     if (chat && view.state !== 'closed') return chat
     if (chatId) throw new Error('This chat has ended.')
     if (!opened.current || view.state === 'closed') {
       setOpening(true); setError(undefined)
-      opened.current = chatApi.open({ machine, sessionId }).then((c) => { found.setChat(c); return c })
+      opened.current = chatApi.open({ machine, sessionId, warm }).then((c) => { found.setChat(c); return c })
       opened.current.catch((e) => setError((e as Error).message)).finally(() => setOpening(false))
     }
     return opened.current
   }, [chat, view.state, chatId, machine, sessionId])
 
-  const warm = useCallback(() => { if (enabled && !chat && !chatId && !opened.current) ensure().catch(() => {}) }, [enabled, chat, chatId, ensure])
+  // the box was focused: bring the agent up if it is not (never started, or ended since); the server keeps it to one
+  const warm = useCallback(() => { if (enabled && !chatId && (chat ? view.state === 'closed' : !opened.current)) ensure().catch(() => {}) }, [enabled, chat, chatId, view.state, ensure])
+  // the page is open on this session: bring its agent up now, not when the box is first clicked
+  useEffect(() => { if (enabled && sessionId && !chatId && found.chat === null && !opened.current) ensure(true).catch(() => {}) }, [enabled, sessionId, chatId, found.chat])
   const guard = (f: () => Promise<unknown>) => f().then(() => true, (e) => { say((e as Error).message); return false })
   const send = useCallback(async (text: string, images?: { mimeType: string; data: string }[]) => {
     try {

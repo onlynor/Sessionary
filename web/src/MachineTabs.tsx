@@ -8,6 +8,8 @@ import { useMachine } from './machines'
 import { go, href, type Route } from './route'
 import { SessionList } from './SessionList'
 import { useSessionActions } from './sessionActions'
+import { canChat, prewarmSession } from './chat'
+import { startNewSession } from './NewSession'
 import { TrashView } from './TrashView'
 import { MoreMenu, ProjectMark, ToolbarTools, shortPath, useUi } from './ui'
 import { cleanTitle, plainText, relTime } from './format'
@@ -87,7 +89,7 @@ export function ProjectsTab({ agentId }: { agentId?: string }) {
       { label: t('Open sessions'), icon: 'message', onSelect: () => openProject(r) },
       { label: t('Open a terminal here'), icon: 'terminal', onSelect: () => launchTerminal(ui.say, { machine: machine.id, kind: 'shell', cwd: r.dir }), disabled: !r.dir },
       ...(withTool.length ? ['-' as const] : []),
-      ...withTool.map((a) => ({ label: t('New {agent} session here', { agent: a.label }), icon: 'other', onSelect: () => launchTerminal(ui.say, { machine: machine.id, kind: 'new', agent: a.id, cwd: r.dir }), disabled: !r.dir })),
+      ...withTool.map((a) => ({ label: t('New {agent} session here', { agent: a.label }), icon: 'other', onSelect: () => startNewSession({ agent: a.id, cwd: r.dir }), disabled: !r.dir })),
     ]} />
   )
   const state = (r: ProjectRow) => r.sessions.some((s) => s.active)
@@ -111,7 +113,8 @@ export function ProjectsTab({ agentId }: { agentId?: string }) {
           </span>
           {state(r)}
         </button>
-        <button className="ws-latest" onClick={() => act.open(latest)} title={t('Open the latest session')}>
+        <button className="ws-latest" onClick={() => act.open(latest)} title={t('Open the latest session')}
+          onPointerEnter={() => { if (canChat(latest.agent, machine.kind)) prewarmSession(machine.id, latest.id) }}>
           <span className="ws-latest-label">{t('Latest session')}</span>
           <span className="ws-latest-title"><AgentIcon agent={latest.agent} size={13} /><span className="ellip">{cleanTitle(latest.title)}</span><span className="ws-latest-time">{relTime(latest.updatedAt)}</span></span>
           {latest.preview && <span className="ws-latest-preview">{plainText(latest.preview)}</span>}

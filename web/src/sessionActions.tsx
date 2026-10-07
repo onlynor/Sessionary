@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { t } from './i18n'
 import { launchTerminal } from './actions'
+import { startNewSession } from './NewSession'
 import type { MenuItem } from './ContextMenu'
 import { useMachine } from './machines'
 import { go, href } from './route'
@@ -59,7 +60,7 @@ export function useSessionActions() {
     if (!r.ok) throw new Error(body.error)
     copy(body.line, t('resume command'))
   })
-  const newHere = (s: SessionSummary) => launchTerminal(say, { machine: machine.id, kind: 'new', agent: s.agent, cwd: s.cwd })
+  const newHere = (s: SessionSummary) => startNewSession({ agent: s.agent, cwd: s.cwd && !s.project.generic ? s.cwd : undefined })
 
   const trash = (s: SessionSummary, then?: () => void) => guard(async () => {
     await api.hide(s.id); await reload(); then?.()

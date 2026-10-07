@@ -5,7 +5,7 @@ async function get<T>(url: string, init?: RequestInit): Promise<T> {
   if (!r.ok) {
     // surface the server's explanation (e.g. "may still be running") instead of a bare status
     const body = await r.json().catch(() => null)
-    throw new Error(body?.error ?? `${r.status} ${url}`)
+    throw Object.assign(new Error(body?.error ?? `${r.status} ${url}`), { status: r.status })
   }
   return r.json()
 }
@@ -13,8 +13,15 @@ const enc = encodeURIComponent
 // state-changing calls carry the per-launch token the server hands to same-origin pages only
 let token: Promise<string> | undefined
 export const tok = () => (token ??= get<{ token: string }>('/api/token').then((t) => t.token))
-const send = async <T = { ok: boolean }>(method: string, url: string, body?: unknown) =>
-  get<T>(url, { method, headers: { 'content-type': 'application/json', 'x-sessionary-token': await tok() }, body: body === undefined ? undefined : JSON.stringify(body) })
+// a server that was restarted has a new token: the page asks for it once and tries again
+const send = async <T = { ok: boolean }>(method: string, url: string, body?: unknown): Promise<T> => {
+  const call = async () => get<T>(url, { method, headers: { 'content-type': 'application/json', 'x-sessionary-token': await tok() }, body: body === undefined ? undefined : JSON.stringify(body) })
+  try { return await call() } catch (e) {
+    if ((e as { status?: number }).status !== 403) throw e
+    token = undefined
+    return call()
+  }
+}
 const post = <T = { ok: boolean }>(url: string, body?: unknown) => send<T>('POST', url, body ?? {})
 
 /** Where a machine's own API lives: `/api/…` for this computer, the same API behind a prefix for a node. */
@@ -100,7 +107,8 @@ const chatBase = '/api/chats'
 export const chatApi = {
   list: async (machine?: string) => get<ChatSummary[]>(`${chatBase}${machine ? `?machine=${enc(machine)}` : ''}`, { headers: { 'x-sessionary-token': await tok() } }),
   forSession: (machine: string, agent: string, session: string) => get<ChatSummary | null>(`${chatBase}/for?machine=${enc(machine)}&agent=${enc(agent)}&session=${enc(session)}`),
-  open: (o: { machine: string; agent?: string; sessionId?: string; cwd?: string; model?: string; mode?: string; effort?: string }) => post<ChatSummary>(chatBase, o),
+  /** returns at once (the agent comes up in the background); `warm`: started ahead of time, before anyone asked */
+  open: (o: { machine: string; agent?: string; sessionId?: string; cwd?: string; model?: string; mode?: string; effort?: string; warm?: boolean }) => post<ChatSummary>(chatBase, o),
   get: (id: string) => get<ChatSummary>(`${chatBase}/${enc(id)}`),
   events: async (id: string) => new EventSource(`${chatBase}/${enc(id)}/events?token=${enc(await tok())}`),
   send: (id: string, text: string, images?: { mimeType: string; data: string }[]) => post(`${chatBase}/${enc(id)}/send`, { text, images }),

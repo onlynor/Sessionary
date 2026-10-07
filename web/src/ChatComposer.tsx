@@ -63,7 +63,7 @@ const readImage = (f: File) => new Promise<Img | undefined>((res) => {
  * The message box of a live chat: send, steer while the agent works, stop, choose the model / mode / effort, and
  * type `/` for the agent's own commands. It is the same box for every agent; what the agent cannot do is not offered.
  */
-export function ChatComposer({ agentName, view, opening, error, placeholder, disabled, hint, onWarm, onSend, onInterrupt, onModel, onMode, onEffort }: {
+export function ChatComposer({ agentName, view, opening, error, placeholder, disabled, hint, reopens, onWarm, onSend, onInterrupt, onModel, onMode, onEffort }: {
   agentName: string
   view: ChatView
   /** the chat is being started */
@@ -72,6 +72,8 @@ export function ChatComposer({ agentName, view, opening, error, placeholder, dis
   placeholder?: string
   disabled?: string
   hint?: string
+  /** a session's chat: when its agent has ended (crashed, closed while idle) the next message starts it again */
+  reopens?: boolean
   /** the box was focused: start the chat now so it is ready when the message is */
   onWarm: () => void
   onSend: (text: string, images?: { mimeType: string; data: string }[]) => Promise<boolean>
@@ -89,7 +91,8 @@ export function ChatComposer({ agentName, view, opening, error, placeholder, dis
   const ta = useRef<HTMLTextAreaElement>(null)
   const { info, state } = view
   const working = state === 'working' || state === 'waiting'
-  const closed = state === 'closed'
+  // ended for good only where nothing can start it again (a new chat whose agent never wrote a session)
+  const closed = state === 'closed' && !reopens
   const steer = info.caps?.steer !== false
   const canType = !disabled && !closed
 

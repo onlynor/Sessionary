@@ -556,16 +556,19 @@ export interface Quick {
   onProject: () => void; onOpenFile: (path: string) => void
 }
 
-/** The session's own verbs, under its title: pick up where it left off, or jump to its project. */
-function SessionActions({ q, canContinue, onContinueHere }: { q: Quick; canContinue: boolean; onContinueHere: () => void }) {
+/**
+ * The session's own verbs, under its title. Where the agent can chat, the conversation below is the way to carry on
+ * (its composer is always live), so the agent's own terminal is a secondary choice; where it cannot, resuming in a
+ * terminal is the way, and leads.
+ */
+function SessionActions({ q, canContinue }: { q: Quick; canContinue: boolean; onContinueHere: () => void }) {
   useT()
   return (
     <div className="doc-actions">
-      <button className="btn primary" onClick={q.onResume} disabled={!q.canResume}
+      <button className={`btn ${canContinue ? '' : 'primary'}`} onClick={q.onResume} disabled={!q.canResume}
         title={q.canResume ? t('Reopen this session in a terminal here') : t('This agent has no resume command')}>
-        <Icon name="play" size={14} stroke={1.8} />{t('Resume in Terminal')}
+        <Icon name="terminal" size={14} />{t('Resume in Terminal')}
       </button>
-      {canContinue && <button className="btn" onClick={onContinueHere} title={t('Send one more prompt from here, read-only by default')}><Icon name="message" size={14} />{t('Continue here')}</button>}
       <span className="doc-actions-sep" />
       {q.onFolder && <button className="btn icon" onClick={q.onFolder} title={t('Open folder')} aria-label={t('Open folder')}><Icon name="folder-open" size={15} /></button>}
       {q.onTerminal && <button className="btn icon" onClick={q.onTerminal} title={t('Open terminal here')} aria-label={t('Open terminal here')}><Icon name="terminal" size={15} /></button>}

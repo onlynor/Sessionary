@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { t, useT } from './i18n'
 import { AgentIcon } from './AgentIcon'
 import { launchTerminal, projectDir } from './actions'
+import { startNewSession } from './NewSession'
 import { relAgo } from './format'
 import { Icon } from './Icon'
 import { useInstalled, useMachine, usable } from './machines'
@@ -11,8 +12,7 @@ import { go, href, type Route } from './route'
 import { SessionList } from './SessionList'
 import { useSessionActions } from './sessionActions'
 import { MoreMenu, OfflinePanel, PageHead, useUi } from './ui'
-import { chatApi, host } from './api'
-import { canChat } from './chat'
+import { host } from './api'
 import { useMachines } from './machines'
 
 /**
@@ -37,16 +37,9 @@ export function AgentPage({ route }: { route: Extract<Route, { page: 'agent' }> 
   const inst = installed?.find((i) => i.id === route.agent)
   const goScope = (p: string | null) => go(href.agent(machine.id, route.agent, { p: p ?? undefined }))
   const label = agent?.label ?? route.agent
-  const newSession = () => launchTerminal(ui.say, { machine: machine.id, kind: 'new', agent: route.agent, cwd: chosen?.dir })
+  // a new session is a chat: in the project on screen, or wherever the sheet is told
+  const newSession = () => startNewSession({ agent: route.agent, cwd: chosen?.dir })
   const latest = own.find((s) => !s.parentId)
-  const chatable = canChat(route.agent, machine.kind) && (!installed || !!inst?.installed)
-  /** a chat in the project on screen, or in a directory the person names */
-  const newChat = (dir?: string) => chatApi.open({ machine: machine.id, agent: route.agent, cwd: dir }).then((c) => go(href.chat(machine.id, c.id)), (e) => ui.say((e as Error).message))
-  const askChat = () => chosen?.dir ? newChat(chosen.dir) : ui.prompt({
-    title: t('New chat'), label: t('Folder to work in'), value: latest?.cwd ?? '', confirm: t('Start chat'), placeholder: machine.kind === 'local' ? t('Empty for your home folder') : t('Empty for the node’s home folder'),
-    onSubmit: (v) => newChat(v || undefined),
-  })
-
   if (!usable(machine)) return <div className="page"><div className="page-inner wide"><PageHead crumbs={[{ label: t('Machines'), href: href.machines }, { label: machine.name, href: href.machine(machine.id) }, { label }]} /><OfflinePanel machine={machine} onConnect={async () => { try { await host.connectNode(machine.id) } catch (e) { ui.say((e as Error).message) } reload() }} /></div></div>
 
   return (
@@ -59,8 +52,7 @@ export function AgentPage({ route }: { route: Extract<Route, { page: 'agent' }> 
           ...(chosen ? [{ label: chosen.name }] : []),
         ]}>
           <button className="btn" onClick={() => latest && act.open(latest)} disabled={!latest}><Icon name="play" size={14} />{t('Continue latest')}</button>
-          {chatable && <button className="btn primary" onClick={askChat} title={t('Talk to {agent} here, with its own model, permissions and commands', { agent: label })}><Icon name="message" size={14} />{chosen ? t('New chat here') : t('New chat')}</button>}
-          <button className={`btn ${chatable ? '' : 'primary'}`} onClick={newSession} disabled={!agent?.canCreate || (!!installed && !inst?.installed)} title={installed && !inst?.installed ? t('This agent was not found on the machine') : undefined}><Icon name="other" size={14} />{chosen ? t('New session here') : t('New session')}</button>
+          <button className="btn primary" onClick={newSession} disabled={!agent?.canCreate || (!!installed && !inst?.installed)} title={installed && !inst?.installed ? t('This agent was not found on the machine') : t('Talk to {agent} here, with its own model, permissions and commands', { agent: label })}><Icon name="other" size={14} />{chosen ? t('New session here') : t('New session')}</button>
           <MoreMenu items={[
             { label: t('Open a terminal here'), icon: 'terminal', onSelect: () => launchTerminal(ui.say, { machine: machine.id, kind: 'shell', cwd: chosen?.dir }) },
             { label: t('Copy history location'), icon: 'copy', onSelect: () => agent && act.copy(agent.storage, t('path')) },

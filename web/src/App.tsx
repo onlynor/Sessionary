@@ -15,6 +15,7 @@ import { MachinesPage } from './MachinesPage'
 import { Nav } from './Nav'
 import { NotifyProvider } from './notify'
 import { NodesPage } from './NodesPage'
+import { NewSessionHost, startNewSession } from './NewSession'
 import { Palette } from './Palette'
 import { Prompt, type PromptSpec } from './Prompt'
 import { go, href, useRoute, type Route } from './route'
@@ -183,6 +184,7 @@ function Window({ route, machine, lang, theme, setTheme, down }: { route: Route;
 
           {settings && <SettingsMenu at={settings} onClose={() => setSettings(undefined)} theme={theme} onTheme={setTheme} lang={lang} onLang={setLang}
             onRefresh={rescan} refreshing={refreshing} lastScan={lastScan} indexed={sessions.length} machine={machine.name} onHelp={() => setHelp(true)} />}
+          <NewSessionHost />
           {toast && <Toast msg={toast} onDone={() => setToast(undefined)} />}
           {confirm && <Confirm spec={confirm} onClose={() => setConfirm(undefined)} />}
           {prompt && <Prompt spec={prompt} onClose={() => setPrompt(undefined)} />}
@@ -222,6 +224,7 @@ function PaletteHost({ machine, onClose, toggleNav, rescan, theme, setTheme, lan
         { id: 'agents', label: `${machine.name}: ${t('Agents')}`, icon: 'task', run: () => go(href.machine(machine.id)) },
         { id: 'projects', label: `${machine.name}: ${t('Projects')}`, icon: 'folder', run: () => go(href.machine(machine.id, 'projects')) },
         { id: 'sessions', label: `${machine.name}: ${t('Sessions')}`, icon: 'message', run: () => go(href.machine(machine.id, 'sessions')) },
+        { id: 'new-session', label: t('New session'), icon: 'other', run: () => startNewSession() },
         { id: 'terminal', label: t('Open a terminal'), icon: 'terminal', run: () => launchTerminal(ui.say, { machine: machine.id, kind: 'shell' }) },
         { id: 'monitor', label: `${machine.name}: ${t('Monitor')}`, icon: 'activity', run: () => go(href.machine(machine.id, 'monitor')) },
         { id: 'models', label: t('Models'), icon: 'models', run: () => go(href.models()) },

@@ -183,7 +183,7 @@ export function SessionPage({ route }: { route: Extract<Route, { page: 'session'
   ) : null
   const fallback = !!chat.error && local && !!act.agentOf(summary ?? { agent: agentId })?.canContinue
   const chatBox = chatOk && !fallback ? ({ onSent }: { onSent: () => void }) => (
-    <ChatComposer agentName={agentName(agentId)} view={chat.view} opening={chat.opening} error={chat.error} onWarm={chat.warm}
+    <ChatComposer agentName={agentName(agentId)} view={chat.view} opening={chat.opening} error={chat.error} reopens onWarm={chat.warm}
       hint={summary?.active && !chat.chat ? t('Written to in the last two minutes — probably open elsewhere') : undefined}
       onSend={async (text, images) => { const ok = await chat.send(text, images); if (ok) onSent(); return ok }}
       onInterrupt={() => { chat.interrupt() }} onModel={chat.setModel} onMode={chat.setMode} onEffort={chat.setEffort} />
