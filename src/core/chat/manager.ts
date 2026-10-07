@@ -98,7 +98,7 @@ export interface ChatsOptions {
   /** swap a driver for a test */
   driverFor?: (req: OpenRequest, emit: (e: ChatEvent) => void, spawner: Spawner) => ChatDriver | undefined
   /** what an agent is started with besides what its protocol needs: its model routing (control/agents.ts) */
-  launchFor?: (agent: ChatAgent, machine: string) => Promise<{ env: Record<string, string>; args: string[]; secret?: { name: string; value: string }; tunnel?: { remotePort: number; localPort: number }; release?: () => void } | undefined>
+  launchFor?: (agent: ChatAgent, machine: string) => Promise<{ env: Record<string, string>; args: string[]; secret?: { name: string; value: string }; tunnel?: { remotePort: number; localPort: number }; session?: { provider: string; model: string }; release?: () => void } | undefined>
   hooks?: ChatHooks
 }
 
@@ -192,7 +192,7 @@ export class Chats {
       return p
     } : base
     const bin = this.o.binFor?.(req.agent, req.machine) ?? (req.machine === 'local' ? localBin(req.agent) : DEFAULT_BIN[req.agent])
-    const driver = this.o.driverFor?.(req, emit, spawner) ?? this.makeDriver(req, bin, emit, spawner)
+    const driver = this.o.driverFor?.(req, emit, spawner) ?? this.makeDriver(req, bin, emit, spawner, extra?.session)
     chat.driver = driver
     let started = false
     ;(driver as { onEnd?: (e?: string) => void }).onEnd = (error) => {
@@ -224,11 +224,11 @@ export class Chats {
     return false
   }
 
-  private makeDriver(req: OpenRequest, bin: string, emit: (e: ChatEvent) => void, spawner: Spawner): ChatDriver {
-    const common = { spawn: spawner, bin, cwd: req.cwd, resume: req.resume, model: req.model }
+  private makeDriver(req: OpenRequest, bin: string, emit: (e: ChatEvent) => void, spawner: Spawner, routed?: { provider: string; model: string }): ChatDriver {
+    const common = { spawn: spawner, bin, cwd: req.cwd, resume: req.resume, model: req.model ?? routed?.model }
     switch (req.agent) {
       case 'claude-code': return new ClaudeDriver({ ...common, mode: req.mode }, emit)
-      case 'codex': return new CodexDriver({ ...common, mode: req.mode, effort: req.effort }, emit)
+      case 'codex': return new CodexDriver({ ...common, mode: req.mode, effort: req.effort, provider: routed?.provider }, emit)
       case 'opencode': return new AcpDriver({ ...common, agent: 'opencode', args: ['acp'], mode: req.mode }, emit)
       case 'hermes': return new AcpDriver({ ...common, agent: 'hermes', args: ['acp'], mode: req.mode }, emit)
       case 'pi': return new PiDriver({ ...common, effort: req.effort }, emit)

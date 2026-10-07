@@ -50,7 +50,7 @@ export class CodexDriver implements ChatDriver {
   private ended = false
   onEnd?: (error?: string) => void
 
-  constructor(private o: { spawn: Spawner; bin?: string; cwd?: string; resume?: string; model?: string; mode?: string; effort?: string }, private emit: Emit) {
+  constructor(private o: { spawn: Spawner; bin?: string; cwd?: string; resume?: string; model?: string; mode?: string; effort?: string; provider?: string }, private emit: Emit) {
     if (o.mode && MODES.some((m) => m.id === o.mode)) this.mode = o.mode
     this.model = o.model
     this.effort = o.effort
@@ -66,7 +66,8 @@ export class CodexDriver implements ChatDriver {
     this.rpc.notify('initialized', {})
     const list = await this.rpc.request('model/list', {}, 30_000).catch(() => ({ data: [] }))
     const m = MODES.find((x) => x.id === this.mode)!
-    const base = { cwd: this.o.cwd, approvalPolicy: m.policy, sandbox: m.sandbox, ...(this.model && { model: this.model }) }
+    // a routed chat names its provider: a resumed thread otherwise stays on the one it was started with
+    const base = { cwd: this.o.cwd, approvalPolicy: m.policy, sandbox: m.sandbox, ...(this.model && { model: this.model }), ...(this.o.provider && { modelProvider: this.o.provider }) }
     const th = this.o.resume
       ? await this.rpc.request('thread/resume', { threadId: this.o.resume, excludeTurns: true, ...base }, 60_000).catch((e) => { throw new ChatError(e.message, 'failed') })
       : await this.rpc.request('thread/start', base, 60_000).catch((e) => { throw new ChatError(e.message, 'failed') })

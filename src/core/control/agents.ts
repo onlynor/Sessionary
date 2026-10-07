@@ -128,13 +128,15 @@ export function agentModelState(agent: string, roots: Roots = localRoots(), gate
   return { agent, via: 'default', launch: 'manual' }
 }
 
-/** what a bound agent is started with: added to its environment and its command line */
 /**
  * What a bound agent is started with. `secret` is the one value that grants use of the gateway: kept apart from `env`
  * so that on a node it can travel inside the SSH connection (SendEnv) instead of on a command line, where anyone on
  * the node could read it. On this computer it is simply part of the environment.
+ *
+ * `session` is for an agent that keeps the provider in the session itself: Codex resumes a thread on the provider it
+ * was started with whatever `-c` says, so a chat has to name the routing again when it opens the thread.
  */
-export interface LaunchProfile { env: Record<string, string>; args: string[]; secret: { name: string; value: string } }
+export interface LaunchProfile { env: Record<string, string>; args: string[]; secret: { name: string; value: string }; session?: { provider: string; model: string } }
 
 /**
  * `gateway` is the gateway's base address (`http://127.0.0.1:4777/gateway`), `key` what opens it for this agent (the
@@ -164,6 +166,7 @@ export function launchProfile(agent: string, target: string, gateway: string, ke
           '-c', `model=${JSON.stringify(target)}`,
         ],
         secret: { name: 'SESSIONARY_GATEWAY_KEY', value: key },
+        session: { provider: 'sessionary', model: target },
       }
     case 'opencode':
       return {

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { chmodSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
@@ -221,5 +221,51 @@ test('prewarmed chats nobody uses stay few; a chat someone looks at is never pus
   const again = await open('w3', false)
   assert.equal(again.id, w3.id)
   await chats.stopAll()
+})
+
+/** a stand-in for `codex app-server` that writes down what each request asked for */
+function fakeCodex() {
+  const dir = mkdtempSync(join(tmpdir(), 'fake-codex-'))
+  const bin = join(dir, 'codex')
+  writeFileSync(bin, `#!/usr/bin/env node
+const fs = require('fs')
+const rl = require('readline').createInterface({ input: process.stdin })
+const out = (o) => process.stdout.write(JSON.stringify(o) + '\\n')
+rl.on('line', (l) => {
+  const o = JSON.parse(l)
+  if (o.id === undefined) return
+  fs.appendFileSync(${JSON.stringify(join(dir, 'calls'))}, JSON.stringify({ method: o.method, params: o.params }) + '\\n')
+  if (o.method === 'initialize') return out({ id: o.id, result: { userAgent: 'codex/0.1.0' } })
+  if (o.method === 'model/list') return out({ id: o.id, result: { data: [] } })
+  if (o.method === 'thread/resume' || o.method === 'thread/start') return out({ id: o.id, result: { thread: { id: o.params.threadId ?? 'th-new' }, model: o.params.model ?? 'its-own' } })
+  out({ id: o.id, result: {} })
+})
+`)
+  chmodSync(bin, 0o755)
+  return { bin, calls: () => { try { return readFileSync(join(dir, 'calls'), 'utf8').trim().split('\n').map((l: string) => JSON.parse(l)) } catch { return [] } } }
+}
+
+test('a routed Codex chat names the routing when it opens the thread (a resumed thread keeps its own provider otherwise)', async () => {
+  const codex = fakeCodex()
+  const launchFor = async () => ({ env: {}, args: ['-c', 'model_provider="sessionary"'], session: { provider: 'sessionary', model: 'group/fast' } })
+  const chats = new Chats({ spawnFor: () => localSpawner, binFor: () => codex.bin, launchFor })
+  try {
+    const c = await chats.open({ agent: 'codex', machine: 'local', resume: 'th-old', sessionKey: 'codex:th-old' })
+    await until(() => chats.get(c.id)?.state === 'idle')
+    const resume = codex.calls().find((x: any) => x.method === 'thread/resume')
+    assert.equal(resume.params.modelProvider, 'sessionary')
+    assert.equal(resume.params.model, 'group/fast')
+    assert.equal(chats.get(c.id)?.info.model, 'group/fast')
+
+    // unrouted: nothing is forced on the thread
+    const plain = fakeCodex()
+    const free = new Chats({ spawnFor: () => localSpawner, binFor: () => plain.bin })
+    const d = await free.open({ agent: 'codex', machine: 'local', resume: 'th-old', sessionKey: 'codex:th-old' })
+    await until(() => free.get(d.id)?.state === 'idle')
+    const r2 = plain.calls().find((x: any) => x.method === 'thread/resume')
+    assert.equal(r2.params.modelProvider, undefined)
+    assert.equal(r2.params.model, undefined)
+    await free.stopAll()
+  } finally { await chats.stopAll() }
 })
 
