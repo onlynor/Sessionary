@@ -1,4 +1,4 @@
-import type { CtlGroup, CtlProvider, CtlState, Protocol, UsageSummary, ChatSummary, Agent, AgentInstall, Changes, EditBlock, FileDiff, Machine, NodeInfo, NodeInput, OpenTarget, ProjectContext, Run, SearchHit, Session, SessionSummary, Snip, SshHost, Status, Summary, SystemInfo, TermInfo, TreeEntry, Trash } from './types'
+import type { CtlGroup, CtlProvider, CtlState, Protocol, UsageDayRow, ChatSummary, Agent, AgentInstall, Changes, EditBlock, FileDiff, Machine, NodeInfo, NodeInput, OpenTarget, ProjectContext, Run, SearchHit, Session, SessionSummary, Snip, SshHost, Status, Summary, SystemInfo, TermInfo, TreeEntry, Trash } from './types'
 
 async function get<T>(url: string, init?: RequestInit): Promise<T> {
   const r = await fetch(url, init)
@@ -68,6 +68,8 @@ export function makeApi(base = '') {
     stopRun: (runId: string) => post<Run | null>(P(`/api/runs/${enc(runId)}/stop`)),
     runEvents: (runId: string) => new EventSource(P(`/api/runs/${enc(runId)}/events`)),
     imageUrl: (id: string, ref: string) => P(`/api/sessions/${enc(id)}/images/${ref}`),
+    /** tokens per day, session and model, from the agents' own records on this machine */
+    usage: (since: string) => get<UsageDayRow[]>(P(`/api/usage?since=${enc(since)}`)),
   }
 }
 export type Api = ReturnType<typeof makeApi>
@@ -137,5 +139,5 @@ export const controlApi = {
   gatewayKey: () => post<{ key: string }>('/api/control/gateway/key'),
   rotateKey: () => post<{ key: string }>('/api/control/gateway/rotate'),
   snippet: (agent: string, target?: string) => post<{ file: string; lang: string; text: string }>('/api/control/snippet', { agent, target }),
-  usage: (days: number) => get<UsageSummary>(`/api/control/usage?days=${days}`),
+  usageDays: (since: string) => get<UsageDayRow[]>(`/api/control/usage/days?since=${enc(since)}`),
 }

@@ -140,9 +140,9 @@ export interface CtlState {
   providers: CtlProvider[]; groups: CtlGroup[]; agents: CtlAgent[]; presets: CtlPreset[]; health: CtlHealth[]; recent: RouteEvent[]
   gateway: { base: string; key: string; protocols: Record<Protocol, string> }
 }
-export interface UsageBucket { key: string; calls: number; input: number; output: number; cacheRead: number; failed: number }
-export interface UsageRow { at: number; agent: string; target: string; provider: string; model: string; protocol: Protocol; status: number; ms: number; input: number; output: number; cacheRead: number; error?: string; tries: number }
-export interface UsageSummary {
-  totals: { calls: number; failed: number; input: number; output: number; cacheRead: number; ms: number; rerouted: number }
-  byDay: UsageBucket[]; byModel: UsageBucket[]; byAgent: UsageBucket[]; byTarget: UsageBucket[]; recent: UsageRow[]
+/** tokens on one day for one model, from one session (history) or through one route (gateway): src/core/usage.ts */
+export interface UsageDayRow {
+  day: string; model: string; agent: string; sessionId?: string; route?: string
+  input: number; output: number; cacheRead: number; cacheWrite: number; requests: number; failed?: number; cost?: number
 }
+export interface UsageRow { at: number; agent: string; target: string; provider: string; model: string; protocol: Protocol; status: number; ms: number; input: number; output: number; cacheRead: number; error?: string; tries: number }
