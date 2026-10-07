@@ -81,7 +81,7 @@ export function SessionList(p: Props) {
   const [show, setShow] = usePersisted<Show>('show', 'all')
   const [toggled, setToggled] = useState<Record<string, boolean>>({})
   const [menu, setMenu] = useState<{ x: number; y: number; s: SessionSummary } | null>(null)
-  const [viewMenu, setViewMenu] = useState<{ left: number; top: number }>()
+  const [viewMenu, setViewMenu] = useState<{ left: number; top: number; anchor: { top: number; bottom: number } }>()
   const filterRef = useRef<HTMLInputElement>(null)
   const agent = p.agent ?? ''
 
@@ -143,7 +143,7 @@ export function SessionList(p: Props) {
       title={[s.title, s.preview, fullTime(s.updatedAt)].filter(Boolean).join('\n\n')}>
       <AgentIcon agent={s.agent} size={16} />
       <span className="srow-main">
-        <span className="srow-title">{cleanTitle(s.title)}{s.pinned && <span className="row-pin" title={t('Pinned')}><Icon name="pin" size={12} /></span>}{s.active && <span className="live-dot" title={t('Active now')} />}</span>
+        <span className="srow-title"><span className="srow-text">{cleanTitle(s.title)}</span>{s.pinned && <span className="row-pin" title={t('Pinned')}><Icon name="pin" size={12} /></span>}{s.active && <span className="live-dot" title={t('Active now')} />}</span>
         <span className="srow-sub">{s.preview ? plainText(s.preview) : s.project.generic ? t('No project') : s.project.name}</span>
       </span>
       <span className="srow-proj">{s.project.generic ? '' : s.project.name}{s.gitBranch && <span className="row-branch"> · {s.gitBranch}</span>}</span>
@@ -156,7 +156,8 @@ export function SessionList(p: Props) {
   const agentsWith = agents.filter((a) => sessions.some((s) => s.agent === a.id))
   return (
     <div className={`slist ${p.embedded ? 'embedded' : ''}`}>
-      <div className="node-toolbar">
+      <div className="list-toolbar">
+        <div className="lt-scope">
         {p.onAgent && (
           <span className="seg sm" role="radiogroup" aria-label={t('Agents')}>
             <button role="radio" aria-checked={!agent} className={!agent ? 'on' : ''} onClick={() => p.onAgent!('')}>{t('All agents')}</button>
@@ -164,15 +165,19 @@ export function SessionList(p: Props) {
           </span>
         )}
         {p.onProject && <ProjectScope sessions={own} value={scope} onChange={p.onProject} />}
-        <span className="grow" />
-        <label className="field node-filter">
+        </div>
+        <div className="lt-tools">
+        <label className="field lt-search">
           {searching ? <span className="spinner" /> : <Icon name="search" size={14} />}
           <input ref={filterRef} value={filter} onChange={(e) => setFilter(e.target.value)} placeholder={t('Search titles and messages')} aria-label={t('Search titles and messages')} spellCheck={false}
             onKeyDown={(e) => { if (e.key === 'Escape') { setFilter(''); e.currentTarget.blur() } else if (e.key === 'Enter' && visible[0]) p.onOpen(visible[0]) }} />
           {filter && <button className="field-clear" onClick={() => setFilter('')} aria-label={t('Clear filter')}><Icon name="x" size={14} /></button>}
         </label>
-        <button className={`btn icon ${custom ? 'on' : ''}`} onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setViewMenu(viewMenu ? undefined : { left: r.right - 232, top: r.bottom + 6 }) }}
-          title={t('Sort, group and filter')} aria-label={t('Sort, group and filter')} aria-expanded={!!viewMenu}><Icon name="sort" size={15} /></button>
+        <button className={`btn lt-sort ${custom ? 'custom' : ''} ${viewMenu ? 'on' : ''}`} onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setViewMenu(viewMenu ? undefined : { left: r.right - 240, top: r.bottom + 6, anchor: { top: r.top, bottom: r.bottom } }) }}
+          title={t('Sort, group and filter')} aria-label={t('Sort, group and filter')} aria-haspopup="menu" aria-expanded={!!viewMenu}>
+          <Icon name="sort" size={14} /><span className="lt-sort-label">{t(SORTS.find(([v]) => v === sort)![1])}</span>{custom && <span className="lt-dot" aria-hidden="true" />}<Icon name="down" size={12} />
+        </button>
+        </div>
       </div>
 
       {!p.loaded ? <div className="list-loading" aria-busy="true">{[0, 1, 2, 3, 4].map((i) => <div key={i} className="sk-row"><span className="sk-lines"><span style={{ width: `${70 - i * 7}%` }} /><span style={{ width: `${45 + i * 5}%` }} /></span></div>)}</div>
@@ -205,7 +210,7 @@ export function SessionList(p: Props) {
                     onContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, s }) }}>
                     <AgentIcon agent={h.session.agent} size={16} />
                     <span className="srow-main">
-                      <span className="srow-title">{cleanTitle(h.session.title)}</span>
+                      <span className="srow-title"><span className="srow-text">{cleanTitle(h.session.title)}</span></span>
                       {h.snippets[0] && <span className="srow-sub">{h.snippets[0].role === 'user' ? `${t('You')}: ` : ''}<Snippet s={h.snippets[0]} /></span>}
                     </span>
                     <span className="srow-time">{t(h.hits === 1 ? '{n} match' : '{n} matches', { n: h.hits })}</span>
@@ -227,7 +232,7 @@ export function SessionList(p: Props) {
 
       {menu && <ContextMenu x={menu.x} y={menu.y} onClose={() => setMenu(null)} items={p.menuFor(menu.s)} />}
       {viewMenu && (
-        <Popover at={viewMenu} onClose={() => setViewMenu(undefined)} label={t('Sort, group and filter')} width={232}>
+        <Popover at={viewMenu} anchor={viewMenu.anchor} onClose={() => setViewMenu(undefined)} label={t('Sort, group and filter')} width={240}>
           <div className="menu-label">{t('Sort by')}</div>
           {SORTS.map(([v, l]) => <button key={v} className="menu-item" role="menuitemradio" aria-checked={sort === v} onClick={() => setSort(v)}><span className="grow">{t(l)}</span>{sort === v && <span className="check"><Icon name="check" size={14} /></span>}</button>)}
           <div className="menu-sep" />

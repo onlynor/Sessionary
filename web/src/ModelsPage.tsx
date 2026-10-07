@@ -56,13 +56,13 @@ export function ModelsPage({ provider: chosen, add }: { provider?: string; add: 
                 {providers.map((p) => {
                   const users = (state.agents ?? []).filter((a) => a.target && (a.target.startsWith(p.id + '/') || (a.target.startsWith('group/') && state.groups.find((g) => `group/${g.id}` === a.target)?.members.some((m) => m.startsWith(p.id + '/')))))
                   return (
-                    <a key={p.id} role="listitem" className={`prow ${p.id === current?.id ? 'on' : ''} ${p.on ? '' : 'off'}`} href={href.models(p.id)} aria-current={p.id === current?.id ? 'true' : undefined}>
+                    <a key={p.id} role="listitem" className={`lrow ${p.id === current?.id ? 'on' : ''} ${p.on ? '' : 'off'}`} href={href.models(p.id)} aria-current={p.id === current?.id ? 'true' : undefined}>
                       <ProviderMark provider={p} presets={state.presets} size={30} />
-                      <span className="prow-text">
-                        <span className="prow-name">{p.name}</span>
-                        <span className="prow-sub">{hostOf(Object.values(p.endpoints)[0])} · {t('{n} models', { n: p.models.filter((m) => m.on).length })}</span>
+                      <span className="lrow-text">
+                        <span className="lrow-name">{p.name}</span>
+                        <span className="lrow-sub">{hostOf(Object.values(p.endpoints)[0])} · {t('{n} models', { n: p.models.filter((m) => m.on).length })}</span>
                       </span>
-                      {users.length > 0 && <span className="prow-users">{users.slice(0, 3).map((a) => <span key={a.agent} className="agent-dot" title={AGENT_NAME[a.agent]}><AgentIcon agent={a.agent} size={11} /></span>)}</span>}
+                      {users.length > 0 && <span className="lrow-users">{users.slice(0, 3).map((a) => <span key={a.agent} className="agent-dot" title={AGENT_NAME[a.agent]}><AgentIcon agent={a.agent} size={11} /></span>)}</span>}
                       <span className={`sdot ${p.on ? (p.hasKey || presetOf(state.presets, p)?.keyless ? 'sd-online' : 'sd-error') : 'sd-offline'}`} />
                     </a>
                   )

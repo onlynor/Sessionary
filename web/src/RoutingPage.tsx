@@ -55,11 +55,11 @@ export function RoutingPage({ group: chosen }: { group?: string }) {
           <div className="ctl-split groups">
             <div className="plist group-card" role="list">
               {groups.map((g) => (
-                <a key={g.id} role="listitem" className={`prow ${g.id === current.id ? 'on' : ''} ${g.on ? '' : 'off'}`} href={href.routing(g.id)} aria-current={g.id === current.id ? 'true' : undefined}>
+                <a key={g.id} role="listitem" className={`lrow ${g.id === current.id ? 'on' : ''} ${g.on ? '' : 'off'}`} href={href.routing(g.id)} aria-current={g.id === current.id ? 'true' : undefined}>
                   <MemberStack state={state} members={g.members} />
-                  <span className="prow-text">
-                    <span className="prow-name">{g.name}</span>
-                    <span className="prow-sub mono">group/{g.id}</span>
+                  <span className="lrow-text">
+                    <span className="lrow-name">{g.name}</span>
+                    <span className="lrow-sub mono">group/{g.id}</span>
                   </span>
                   <span className="pill-quiet">{g.mode === 'rotate' ? t('In turn') : t('In order')}</span>
                 </a>

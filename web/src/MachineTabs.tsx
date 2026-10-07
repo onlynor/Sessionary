@@ -35,11 +35,12 @@ export function ProjectsTab({ agentId }: { agentId?: string }) {
   const rows = useMemo(() => projectsOf(agentId ? sessions.filter((s) => s.agent === agentId) : sessions).filter((r) => !q.trim() || `${r.name} ${r.key}`.toLowerCase().includes(q.trim().toLowerCase())), [sessions, agentId, q])
   const withTool = agents.filter((a) => a.canCreate && (!agentId || a.id === agentId))
   return (
-    <>
-      <div className="node-toolbar">
-        <span className="section-label inline">{t('Projects')} · {rows.length}</span>
-        <span className="grow" />
-        <label className="field node-filter"><Icon name="search" size={14} /><input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('Search projects')} aria-label={t('Search projects')} spellCheck={false} /></label>
+    <div className="projects">
+      <div className="list-toolbar">
+        <div className="lt-scope"><span className="lt-title">{t('Projects')}</span><span className="lt-count">{rows.length}</span></div>
+        <div className="lt-tools">
+        <label className="field lt-search"><Icon name="search" size={14} /><input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('Search projects')} aria-label={t('Search projects')} spellCheck={false} /></label>
+        </div>
       </div>
       {!rows.length ? <div className="empty-state"><span className="tile"><Icon name="folder" size={28} stroke={1.5} /></span>{q ? t('No project matches.') : t('No projects yet. A project appears when an agent works in a directory.')}</div> : (
         <div className="group-card">
@@ -47,12 +48,15 @@ export function ProjectsTab({ agentId }: { agentId?: string }) {
             <div key={r.key} className="prow">
               <button className="prow-main" onClick={() => go(href.machine(machine.id, 'sessions', { p: r.key, agent: agentId }))} title={r.dir}>
                 <span className="folder-tile"><Icon name="folder" size={16} /></span>
-                <span className="t-main"><span className="r-title">{r.name}</span><span className="r-meta ellip">{r.dir ?? r.key}{r.missing ? ` · ${t('Directory no longer exists')}` : ''}</span></span>
+                <span className="prow-text">
+                  <span className="prow-title">{r.name}</span>
+                  <span className="prow-path">{r.dir ?? r.key}{r.missing && <span className="prow-missing"> · {t('Directory no longer exists')}</span>}</span>
+                </span>
                 <span className="prow-agents">{r.agents.map((a) => <AgentIcon key={a} agent={a} size={14} />)}</span>
-                <span className="r-meta">{t('{n} sessions', { n: r.sessions.length })}</span>
-                <span className="r-meta prow-time">{relAgo(r.last)}</span>
+                <span className="prow-count">{t('{n} sessions', { n: r.sessions.length })}</span>
+                <span className="prow-time">{relAgo(r.last)}</span>
               </button>
-              <MoreMenu items={[
+              <MoreMenu className="btn icon ghost prow-more" items={[
                 { label: t('Open sessions'), icon: 'message', onSelect: () => go(href.machine(machine.id, 'sessions', { p: r.key, agent: agentId })) },
                 { label: t('Open a terminal here'), icon: 'terminal', onSelect: () => launchTerminal(ui.say, { machine: machine.id, kind: 'shell', cwd: r.dir }), disabled: !r.dir },
                 ...(withTool.length ? ['-' as const] : []),
@@ -62,7 +66,7 @@ export function ProjectsTab({ agentId }: { agentId?: string }) {
           ))}
         </div>
       )}
-    </>
+    </div>
   )
 }
 

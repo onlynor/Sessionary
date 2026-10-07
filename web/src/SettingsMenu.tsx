@@ -1,16 +1,36 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
+import { placeMenu } from './place'
 import { Icon } from './Icon'
 import { THEMES, type ThemeChoice } from './theme'
 import { LANGS, t, useT, type Lang } from './i18n'
 import { relAgo } from './format'
 
-/** A menu at a fixed screen point (opening upwards from `bottom`, or down from `top`), kept on screen. */
-export function Popover({ at, onClose, children, width = 260, label, solid }: {
-  at: { left: number; top?: number; bottom?: number }; onClose: () => void; children: React.ReactNode; width?: number; label: string; solid?: boolean
+/**
+ * A menu at a screen point (down from `top`, or up from `bottom`), always wholly on screen: measured before it
+ * shows, flipped above its `anchor` when there is more room there, and scrolling inside when the window is too
+ * small. It is drawn in the document's body so no page (an animated or scrolled one) can move or clip it.
+ */
+export function Popover({ at, anchor, onClose, children, width = 260, label, solid }: {
+  at: { left: number; top?: number; bottom?: number }; anchor?: { top: number; bottom: number }; onClose: () => void; children: React.ReactNode; width?: number; label: string; solid?: boolean
 }) {
   const ref = useRef<HTMLDivElement>(null)
-  const [left, setLeft] = useState(at.left)
-  useLayoutEffect(() => { setLeft(Math.max(8, Math.min(at.left, innerWidth - width - 8))) }, [at.left, width])
+  const inner = useRef<HTMLDivElement>(null)
+  const [place, setPlace] = useState<ReturnType<typeof placeMenu>>()
+  useLayoutEffect(() => {
+    const el = ref.current, sc = inner.current
+    // the frame's padding plus everything inside it
+    if (el && sc) setPlace(placeMenu(at, { w: width, h: sc.scrollHeight + (el.offsetHeight - sc.clientHeight) }, anchor))
+  }, [at.left, at.top, at.bottom, width, anchor?.top])
+  // a menu cut short by the window fades its contents at the edge where more of them is (as a native menu shows an
+  // arrow there); the pane itself stays whole
+  const edges = () => {
+    const el = inner.current
+    if (!el) return
+    el.dataset.above = String(el.scrollTop > 2)
+    el.dataset.below = String(el.scrollTop + el.clientHeight < el.scrollHeight - 2)
+  }
+  useLayoutEffect(edges, [place])
   useEffect(() => {
     const off = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) onClose() }
     const key = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
@@ -19,11 +39,13 @@ export function Popover({ at, onClose, children, width = 260, label, solid }: {
     addEventListener('keydown', key); addEventListener('resize', onClose)
     return () => { clearTimeout(t); removeEventListener('mousedown', off); removeEventListener('keydown', key); removeEventListener('resize', onClose) }
   }, [onClose])
-  return (
-    <div ref={ref} className={`menu fixed pop-in ${solid ? 'solid' : ''}`} role="menu" aria-label={label}
-      style={{ left, width, top: at.top, bottom: at.bottom, transformOrigin: at.bottom != null ? 'bottom left' : 'top left' }}>
-      {children}
-    </div>
+  const up = place?.bottom != null
+  return createPortal(
+    <div ref={ref} className={`menu fixed ${place ? 'pop-in' : ''} ${solid ? 'solid' : ''}`} role="menu" aria-label={label}
+      style={place ? { ...place, transformOrigin: up ? 'bottom left' : 'top left' } : { left: at.left, top: at.top ?? 0, width, visibility: 'hidden' }}>
+      <div ref={inner} className="menu-scroll" onScroll={edges}>{children}</div>
+    </div>,
+    document.body,
   )
 }
 
