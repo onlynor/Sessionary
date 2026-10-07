@@ -47,9 +47,10 @@ const until = async (f: () => boolean) => { for (let i = 0; i < 100 && !f(); i++
 test('a chat streams, asks for approval, and continues in the same process', async () => {
   const chats = new Chats({ spawnFor: () => localSpawner, binFor: () => fakeClaude() })
   const ch = await chats.open({ agent: 'claude-code', machine: 'local', cwd: tmpdir() })
-  assert.equal(ch.state, 'idle')
-  assert.deepEqual(ch.info.models?.map((m) => m.id), ['default', 'haiku'])
-  assert.equal(ch.info.commands?.[0]?.name, 'compact')
+  await until(() => chats.get(ch.id)!.state === 'idle')
+  const info = chats.get(ch.id)!.info
+  assert.deepEqual(info.models?.map((m) => m.id), ['default', 'haiku'])
+  assert.equal(info.commands?.[0]?.name, 'compact')
   const got = collect(chats, ch.id)
 
   await chats.send(ch.id, { text: 'hello' })
@@ -82,7 +83,12 @@ test('a late reader catches up from the compacted log', async () => {
 
 test('a process that is not there is reported, not hung', async () => {
   const chats = new Chats({ spawnFor: () => localSpawner, binFor: () => '/nonexistent/claude' })
-  await assert.rejects(chats.open({ agent: 'claude-code', machine: 'local', cwd: tmpdir() }))
+  const ch = await chats.open({ agent: 'claude-code', machine: 'local', cwd: tmpdir() })
+  const got = collect(chats, ch.id)
+  await until(() => chats.get(ch.id)?.state === 'closed')
+  assert.match(chats.get(ch.id)!.error ?? '', /not found|ENOENT|did not start/i)
+  assert.ok(got.some((e) => e.t === 'note' && e.level === 'error'), 'the reason is in the chat itself')
+  await assert.rejects(chats.send(ch.id, { text: 'hi' }), /not found|ENOENT|did not start|ended/i)
   await chats.stopAll()
 })
 
@@ -102,6 +108,7 @@ test('a chat releases its door when it is closed', async () => {
   const door = withDoor()
   const chats = new Chats({ spawnFor: () => localSpawner, binFor: () => fakeClaude(), launchFor: door.launchFor })
   const ch = await chats.open({ agent: 'claude-code', machine: 'local', cwd: tmpdir() })
+  await until(() => chats.get(ch.id)!.state === 'idle')
   assert.equal(door.count(), 0)
   await chats.close(ch.id)
   await until(() => door.count() >= 1)
@@ -112,8 +119,8 @@ test('a chat releases its door when it is closed', async () => {
 test('a chat that cannot start releases its door', async () => {
   const door = withDoor()
   const chats = new Chats({ spawnFor: () => localSpawner, binFor: () => '/nonexistent/claude', launchFor: door.launchFor })
-  await assert.rejects(chats.open({ agent: 'claude-code', machine: 'local', cwd: tmpdir() }))
-  await until(() => door.count() >= 1)
+  const ch = await chats.open({ agent: 'claude-code', machine: 'local', cwd: tmpdir() })
+  await until(() => chats.get(ch.id)?.state === 'closed' && door.count() >= 1)
   await chats.stopAll()
 })
 
@@ -146,13 +153,73 @@ test('a node chat whose tunnel port was taken is opened once more on another por
   })
   const ok = failTimes(1)
   const ch = await ok.open({ agent: 'claude-code', machine: 'vps', cwd: '/tmp' })
-  assert.equal(ch.state, 'idle')
+  await until(() => ok.get(ch.id)!.state === 'idle')
   assert.deepEqual([launches, released], [2, 1], 'a fresh launch (port and door) for the second try; the first door closed')
   await ok.stopAll()
 
   launches = 0; released = 0; starts = 0
   const no = failTimes(2)
-  await assert.rejects(no.open({ agent: 'claude-code', machine: 'vps', cwd: '/tmp' }), /remote port forwarding failed/)
+  const gone = await no.open({ agent: 'claude-code', machine: 'vps', cwd: '/tmp' })
+  await until(() => no.get(gone.id)!.state === 'closed')
+  assert.match(no.get(gone.id)!.error ?? '', /remote port forwarding failed/)
   assert.deepEqual([launches, released], [2, 2], 'tried twice, both doors closed')
   await no.stopAll()
 })
+
+// ---------- the lifecycle: open at once, start in the background, never twice ----------
+
+/** a stand-in agent that takes `ms` to come up, counting how many were started */
+function slowDriver(ms: number, counter: { started: number; sent: string[] }) {
+  return (_req: unknown, emit: (e: any) => void) => ({
+    async start() { counter.started++; await new Promise((r) => setTimeout(r, ms)); emit({ t: 'info', info: { models: [{ id: 'm', label: 'M' }] } }) },
+    async send(m: { text: string }) { counter.sent.push(m.text); emit({ t: 'turn', state: 'start' }); emit({ t: 'text.end', id: 't', text: 'ok' }); emit({ t: 'turn', state: 'end', stop: 'done' }) },
+    async close() {}, async interrupt() {}, async respond() {}, async answer() {}, async setModel() {}, async setMode() {}, async setEffort() {},
+  }) as never
+}
+
+test('opening a chat returns at once; what is sent while the agent starts is shown, then delivered', async () => {
+  const n = { started: 0, sent: [] as string[] }
+  const chats = new Chats({ spawnFor: () => localSpawner, driverFor: slowDriver(400, n) })
+  const t0 = Date.now()
+  const ch = await chats.open({ agent: 'claude-code', machine: 'local', cwd: '/tmp', sessionKey: 'claude-code:s1', resume: 's1' })
+  assert.ok(Date.now() - t0 < 100, 'open does not wait for the agent')
+  assert.equal(ch.state, 'starting')
+  const got = collect(chats, ch.id)
+  const sending = chats.send(ch.id, { text: 'first' })
+  await new Promise((r) => setTimeout(r, 50))
+  assert.ok(got.some((e) => e.t === 'user' && e.text === 'first'), 'the message shows before the agent is up')
+  assert.deepEqual(n.sent, [], 'and reaches the agent only once it is up')
+  await sending
+  assert.deepEqual(n.sent, ['first'])
+  await until(() => chats.get(ch.id)!.state === 'idle')
+  await chats.stopAll()
+})
+
+test('two opens of one session (a prewarm and a click) share one agent', async () => {
+  const n = { started: 0, sent: [] as string[] }
+  const chats = new Chats({ spawnFor: () => localSpawner, driverFor: slowDriver(200, n) })
+  const req = { agent: 'claude-code' as const, machine: 'local', cwd: '/tmp', sessionKey: 'claude-code:s1', resume: 's1' }
+  const [a, b] = await Promise.all([chats.open(req, { warm: true }), chats.open(req)])
+  assert.equal(a.id, b.id)
+  await until(() => chats.get(a.id)!.state === 'idle')
+  assert.equal(n.started, 1, 'one agent process')
+  await chats.stopAll()
+})
+
+test('prewarmed chats nobody uses stay few; a chat someone looks at is never pushed out', async () => {
+  const n = { started: 0, sent: [] as string[] }
+  const chats = new Chats({ spawnFor: () => localSpawner, driverFor: slowDriver(10, n) })
+  const open = (k: string, warm = true) => chats.open({ agent: 'claude-code', machine: 'local', cwd: '/tmp', sessionKey: `claude-code:${k}`, resume: k }, { warm })
+  const viewed = await open('viewed')
+  const off = chats.subscribe(viewed.id, 0, () => {}) // the page is open on it
+  const w1 = await open('w1'), w2 = await open('w2'), w3 = await open('w3')
+  await until(() => chats.get(w1.id)!.state === 'closed')
+  const live = chats.list().filter((c) => c.state !== 'closed').map((c) => c.id).sort()
+  assert.deepEqual(live, [viewed.id, w2.id, w3.id].sort(), 'the oldest unused prewarm went; the viewed one stayed')
+  off?.()
+  // a person opening a prewarmed chat makes it an ordinary one
+  const again = await open('w3', false)
+  assert.equal(again.id, w3.id)
+  await chats.stopAll()
+})
+

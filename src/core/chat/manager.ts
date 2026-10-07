@@ -18,6 +18,9 @@ export const PROTOCOL: Record<ChatAgent, string> = { 'claude-code': 'stream-json
 const LOG_MAX = Number(process.env.SESSIONARY_CHAT_LOG_MAX ?? 3000)
 const IDLE_MS = Number(process.env.SESSIONARY_CHAT_IDLE_MS ?? 30 * 60_000)
 const MAX_CHATS = Number(process.env.SESSIONARY_CHAT_MAX ?? 12)
+/** chats started ahead of time (a session page opening, a pointer resting on a session) that nobody has used yet */
+const WARM_MAX = Number(process.env.SESSIONARY_CHAT_WARM_MAX ?? 2)
+const WARM_MS = Number(process.env.SESSIONARY_CHAT_WARM_MS ?? 3 * 60_000)
 
 export interface OpenRequest {
   agent: ChatAgent
@@ -75,6 +78,11 @@ interface Chat {
   lastTurnMs?: number
   toolIdx: Map<string, StoredEvent>
   listeners: number
+  /** started ahead of time and not used yet: the first message or command makes it an ordinary chat; a page open on it
+   *  keeps it alive meanwhile, and once nobody looks it goes after WARM_MS */
+  warm: boolean
+  /** settles when the agent is up (true) or could not start (false); input waits on it */
+  ready: Promise<boolean>
 }
 
 export interface ChatHooks {
@@ -135,47 +143,85 @@ export class Chats {
     }
   }
 
-  /** `attempt`: a node's random tunnel port was taken, so the chat is opened once more on another (see below) */
-  async open(req: OpenRequest, attempt = 0): Promise<ChatSummary> {
+  /**
+   * A chat for this session, at once. The record exists before anything is started, so two opens of one session (a
+   * prewarm and a click) find the same chat and never start two agents; the agent itself comes up in the background,
+   * and whatever is sent meanwhile waits for it. `warm`: opened ahead of time, before anyone asked for it — such chats
+   * are few and short-lived unless someone uses them (starting an agent costs no tokens, only a process).
+   */
+  async open(req: OpenRequest, opts: { warm?: boolean } = {}): Promise<ChatSummary> {
     if (!chatSupported(req.agent)) throw new ChatError('This agent cannot be chatted with from Sessionary.', 'unsupported')
-    const existing = req.sessionKey ? this.forSession(req.machine, req.agent, req.sessionKey) : undefined
-    if (existing) return existing
-    if ([...this.chats.values()].filter((c) => c.state !== 'closed').length >= MAX_CHATS) throw new ChatError(`At most ${MAX_CHATS} chats can run at once; close one first.`, 'busy')
+    const existing = req.sessionKey ? [...this.chats.values()].find((x) => x.state !== 'closed' && x.req.machine === req.machine && x.req.agent === req.agent && this.keyOf(x) === req.sessionKey) : undefined
+    if (existing) {
+      if (!opts.warm) existing.warm = false
+      return this.summary(existing)
+    }
+    const running = [...this.chats.values()].filter((c) => c.state !== 'closed')
+    if (opts.warm) {
+      // a prewarm never crowds out real work: it gives way when the server is busy, and pushes out older prewarms
+      if (running.length >= MAX_CHATS - 1) throw new ChatError('Too many chats are running to start one ahead of time.', 'busy')
+      const idleWarm = running.filter((c) => c.warm && c.listeners === 0).sort((x, y) => x.lastAt - y.lastAt)
+      for (const c of idleWarm.slice(0, Math.max(0, idleWarm.length - WARM_MAX + 1))) this.close(c.id).catch(() => {})
+    } else if (running.length >= MAX_CHATS) throw new ChatError(`At most ${MAX_CHATS} chats can run at once; close one first.`, 'busy')
 
     const id = randomUUID().slice(0, 12)
     const chat: Chat = {
       id, req, state: 'starting', info: { agent: req.agent, cwd: req.cwd }, log: [], seq: 0, subs: new Set(), startedAt: Date.now(), lastAt: Date.now(),
-      pending: new Set(), working: false, toolIdx: new Map(), listeners: 0, driver: undefined as unknown as ChatDriver,
+      pending: new Set(), working: false, toolIdx: new Map(), listeners: 0, driver: undefined as unknown as ChatDriver, warm: !!opts.warm, ready: Promise.resolve(false),
     }
+    this.chats.set(id, chat)
+    chat.ready = this.boot(chat)
+    return this.summary(chat)
+  }
+
+  /** starts the agent for a chat; never throws: a chat that cannot start ends, saying why */
+  private async boot(chat: Chat, attempt = 0): Promise<boolean> {
+    const { req } = chat
     const emit = (e: ChatEvent) => this.record(chat, e)
+    // read fresh each time: the chat can be closed while its agent is still starting
+    const isClosed = () => chat.state === 'closed'
+    let extra: Awaited<ReturnType<NonNullable<ChatsOptions['launchFor']>>>
+    try { extra = await this.o.launchFor?.(req.agent, req.machine) } catch (e) { return this.failed(chat, (e as Error).message) }
+    if (isClosed()) { extra?.release?.(); return false } // closed while it was being prepared
     const base = this.o.spawnFor(req.machine)
-    const extra = await this.o.launchFor?.(req.agent, req.machine)
     // the routing's arguments go first, so a model picked in the chat itself still has the last word; a node's door
     // closes when the process does, however it ends
     const spawner: Spawner = extra ? (s) => {
-      const p = base({ ...s, args: [...extra.args, ...s.args], env: { ...s.env, ...extra.env }, ...(extra.secret && { secret: extra.secret }), ...(extra.tunnel && { tunnel: extra.tunnel }) })
-      if (extra.release) { p.on('close', extra.release); p.on('error', extra.release) }
+      const p = base({ ...s, args: [...extra!.args, ...s.args], env: { ...s.env, ...extra!.env }, ...(extra!.secret && { secret: extra!.secret }), ...(extra!.tunnel && { tunnel: extra!.tunnel }) })
+      if (extra!.release) { p.on('close', extra!.release); p.on('error', extra!.release) }
       return p
     } : base
     const bin = this.o.binFor?.(req.agent, req.machine) ?? (req.machine === 'local' ? localBin(req.agent) : DEFAULT_BIN[req.agent])
     const driver = this.o.driverFor?.(req, emit, spawner) ?? this.makeDriver(req, bin, emit, spawner)
     chat.driver = driver
+    let started = false
     ;(driver as { onEnd?: (e?: string) => void }).onEnd = (error) => {
+      if (!started) return // a failed start is reported once, below
       chat.error = error ?? chat.error
+      if (error) this.record(chat, { t: 'note', level: 'error', text: error })
       this.setState(chat, 'closed')
       this.o.hooks?.changed?.(this.summary(chat), 'closed')
     }
-    this.chats.set(id, chat)
     try { await driver.start() } catch (e) {
-      this.chats.delete(id)
       extra?.release?.() // nothing may have been started to close it
       try { await driver.close() } catch { /* already gone */ }
       // the port picked on the node for the tunnel was in use: another launch picks another port (and a new door)
-      if (extra?.tunnel && attempt === 0 && /remote port forwarding failed/i.test((e as Error).message)) return this.open(req, 1)
-      throw e instanceof ChatError ? e : new ChatError((e as Error).message, 'failed')
+      if (extra?.tunnel && attempt === 0 && !isClosed() && /remote port forwarding failed/i.test((e as Error).message)) return this.boot(chat, 1)
+      return this.failed(chat, (e as Error).message)
     }
+    started = true
+    if (isClosed()) { driver.close().catch(() => {}); return false }
     if (chat.state === 'starting') this.setState(chat, 'idle')
-    return this.summary(chat)
+    return true
+  }
+
+  private failed(chat: Chat, why: string): false {
+    chat.error = why
+    this.record(chat, { t: 'note', level: 'error', text: why })
+    this.setState(chat, 'closed')
+    this.o.hooks?.changed?.(this.summary(chat), 'closed')
+    setTimeout(() => this.chats.delete(chat.id), 60_000).unref?.()
+    return false
   }
 
   private makeDriver(req: OpenRequest, bin: string, emit: (e: ChatEvent) => void, spawner: Spawner): ChatDriver {
@@ -247,6 +293,7 @@ export class Chats {
   subscribe(id: string, after: number, fn: (e: StoredEvent) => void): (() => void) | undefined {
     const c = this.chats.get(id)
     if (!c) return
+    // a page open on it keeps it alive (see sweep); only using it makes a prewarmed chat an ordinary one
     for (const e of c.log.filter((x) => x.seq > after)) fn(e)
     fn({ t: 'status', state: c.state, seq: c.seq, at: Date.now() })
     c.subs.add(fn)
@@ -260,12 +307,22 @@ export class Chats {
     if (c.state === 'closed') throw new ChatError(c.error ?? 'This chat has ended.', 'unavailable')
     return c
   }
+  /** the chat once its agent is up: what was asked of it while it was starting is done now, in order */
+  private async ready(id: string): Promise<Chat> {
+    const c = this.need(id)
+    c.warm = false // used, not just looked at
+    if (!(await c.ready)) throw new ChatError(c.error ?? 'The agent could not start.', 'unavailable')
+    return this.need(id)
+  }
 
   async send(id: string, m: ChatSend) {
-    const c = this.need(id)
+    const first = this.need(id)
     if (!m.text.trim() && !m.images?.length) throw new ChatError('The message is empty.', 'failed')
-    if (c.working && c.info.caps?.steer === false) throw new ChatError('The agent is still working; wait for it to finish or interrupt it.', 'busy')
-    this.record(c, { t: 'user', id: randomUUID().slice(0, 8), text: m.text, ...(c.working && { queued: true }) })
+    if (first.working && first.info.caps?.steer === false) throw new ChatError('The agent is still working; wait for it to finish or interrupt it.', 'busy')
+    first.warm = false
+    // the message shows at once; if the agent is still starting it is delivered as soon as it is up
+    this.record(first, { t: 'user', id: randomUUID().slice(0, 8), text: m.text, ...((first.working || first.state === 'starting') && { queued: true }) })
+    const c = await this.ready(id)
     if (!c.working) { c.working = true; this.setState(c, 'working') }
     try { await c.driver.send(m) } catch (e) {
       // the message did not reach the agent
@@ -274,17 +331,17 @@ export class Chats {
       throw e instanceof ChatError ? e : new ChatError((e as Error).message, 'failed')
     }
   }
-  async interrupt(id: string) { await this.need(id).driver.interrupt() }
-  async respond(id: string, approval: string, option: string) { await this.need(id).driver.respond(approval, option) }
-  async answer(id: string, question: string, answers: Record<string, string[]>) { await this.need(id).driver.answer(question, answers) }
-  async setModel(id: string, model: string) { await this.need(id).driver.setModel(model) }
-  async setMode(id: string, mode: string) { await this.need(id).driver.setMode(mode) }
-  async setEffort(id: string, effort: string) { await this.need(id).driver.setEffort(effort) }
+  async interrupt(id: string) { await (await this.ready(id)).driver.interrupt() }
+  async respond(id: string, approval: string, option: string) { await (await this.ready(id)).driver.respond(approval, option) }
+  async answer(id: string, question: string, answers: Record<string, string[]>) { await (await this.ready(id)).driver.answer(question, answers) }
+  async setModel(id: string, model: string) { await (await this.ready(id)).driver.setModel(model) }
+  async setMode(id: string, mode: string) { await (await this.ready(id)).driver.setMode(mode) }
+  async setEffort(id: string, effort: string) { await (await this.ready(id)).driver.setEffort(effort) }
 
   async close(id: string) {
     const c = this.chats.get(id)
     if (!c) return
-    if (c.state !== 'closed') { this.setState(c, 'closed'); await c.driver.close().catch(() => {}) }
+    if (c.state !== 'closed') { this.setState(c, 'closed'); await c.driver?.close().catch(() => {}) }
     // keep a finished chat's log for a minute so a page that is still open can show how it ended
     setTimeout(() => this.chats.delete(id), 60_000).unref?.()
   }
@@ -294,6 +351,8 @@ export class Chats {
     const now = Date.now()
     for (const c of this.chats.values()) {
       if (c.state === 'idle' && c.listeners === 0 && now - c.lastAt > IDLE_MS) this.close(c.id).catch(() => {})
+      // started ahead of time and never used: it goes soon, so prewarming leaves no crowd of idle agents behind
+      else if (c.warm && c.listeners === 0 && (c.state === 'idle' || c.state === 'starting') && now - c.startedAt > WARM_MS) this.close(c.id).catch(() => {})
     }
   }
 

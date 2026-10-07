@@ -745,16 +745,20 @@ export function createApp(store: IndexStore, webRoot?: string, overlay: OverlayS
         const b = (await c.req.json().catch(() => ({}))) as any
         const machine = String(b.machine ?? 'local')
         if (machine !== 'local') { const n = nodes.list().find((x) => x.id === machine); if (!n) throw new NodeError('No such machine.', 404); if (n.kind !== 'ssh') throw new ChatError('Chats run on this computer and on nodes reached over SSH.', 'unsupported') }
-        let agent = String(b.agent ?? ''), cwd: string | undefined = typeof b.cwd === 'string' && b.cwd && !b.cwd.startsWith('generic:') ? b.cwd : undefined
+        let agent = String(b.agent ?? ''), cwd: string | undefined = typeof b.cwd === 'string' && b.cwd.trim() && !b.cwd.startsWith('generic:') ? b.cwd.trim() : undefined
+        // a folder typed as ~/…: this computer's home here; on a node, relative to where its login shell starts (home)
+        if (cwd && /^~(\/|$)/.test(cwd)) cwd = machine === 'local' ? path.join(os.homedir(), cwd.slice(1)) : cwd.replace(/^~\/?/, '') || undefined
         let resume: string | undefined, key: string | undefined, title: string | undefined
         if (typeof b.sessionId === 'string' && b.sessionId) {
           const t = await chatTarget(machine, b.sessionId)
           agent = t.agent; cwd = t.cwd || cwd; resume = t.resume; key = t.key; title = t.title
         }
         if (!chatSupported(agent)) throw new ChatError(`${chatLabel(agent)} cannot be chatted with from Sessionary.`, 'unsupported')
-        if (machine === 'local' && cwd && !existsSync(cwd)) { if (resume) throw new ChatError('The session’s working directory no longer exists, so the agent cannot resume it.', 'failed'); cwd = undefined }
+        // a folder someone chose must be the one the agent runs in, never quietly another
+        if (machine === 'local' && cwd && !existsSync(cwd)) throw new ChatError(resume ? 'The session’s working directory no longer exists, so the agent cannot resume it.' : 'That folder does not exist on this computer.', 'failed')
         if (machine === 'local' && !cwd) cwd = os.homedir()
-        const ch = await chats.open({ agent, machine, cwd, resume, sessionKey: key, title, model: b.model, mode: b.mode, effort: b.effort })
+        // returns at once: the agent comes up in the background (`warm`: asked for ahead of time, not by a person yet)
+        const ch = await chats.open({ agent, machine, cwd, resume, sessionKey: key, title, model: b.model, mode: b.mode, effort: b.effort }, { warm: b.warm === true })
         return c.json(ch)
       } catch (e) { return chatErr(c, e) }
     })
