@@ -1,7 +1,8 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { DatabaseSync } from './sqlite.ts'
-import type { Message, SessionSummary } from './model.ts'
+import type { Message, SessionSummary, UsageEntry } from './model.ts'
+import { usageByDay, type UsageDayRow } from './usage.ts'
 import { searchableText, snippet, terms } from './search.ts'
 import { dataHome } from './util.ts'
 
@@ -9,7 +10,7 @@ import { dataHome } from './util.ts'
  * Derived index of session summaries. Safe to delete at any time: bump SCHEMA or remove the file and it is
  * rebuilt from the original agent files, which stay the source of truth.
  */
-const SCHEMA = 5
+const SCHEMA = 6
 
 export interface SourceRow { agent: string; key: string; fingerprint: string }
 export interface ListFilter { agent?: string; q?: string; includeChildren?: boolean }
@@ -22,7 +23,7 @@ export class IndexStore {
     this.db = new DatabaseSync(file)
     const v = (this.db.prepare('pragma user_version').get() as any).user_version as number
     if (v !== SCHEMA) {
-      this.db.exec('drop table if exists session; drop table if exists source; drop table if exists content;')
+      this.db.exec('drop table if exists session; drop table if exists source; drop table if exists content; drop table if exists usage_day;')
       this.db.exec(`pragma user_version = ${SCHEMA}`)
     }
     this.db.exec(`
@@ -36,6 +37,14 @@ export class IndexStore {
         title text not null, cwd text, updated_at integer not null, parent_id text, data text not null
       );
       create index if not exists session_updated on session(updated_at desc);
+      -- each session's tokens per day and model (core/usage.ts), for the Usage page
+      create table if not exists usage_day (
+        session_id text not null, agent text not null, day text not null, model text not null,
+        input integer not null, output integer not null, cache_read integer not null, cache_write integer not null,
+        requests integer not null, cost real
+      );
+      create index if not exists usage_day_day on usage_day(day);
+      create index if not exists usage_day_session on usage_day(session_id);
       -- full-text over what is readable in each message; trigram so CJK and partial words match
       create virtual table if not exists content using fts5(session_id unindexed, msg_index unindexed, msg_id unindexed, role unindexed, txt, tokenize = 'trigram case_sensitive 0');
     `)
@@ -46,7 +55,7 @@ export class IndexStore {
     return new Map(rows.map((r) => [r.key, r]))
   }
 
-  upsert(agent: string, key: string, fingerprint: string, s: SessionSummary | null, messages: Message[] = []) {
+  upsert(agent: string, key: string, fingerprint: string, s: SessionSummary | null, messages: Message[] = [], usage?: UsageEntry[]) {
     this.db.exec('begin')
     try {
       const old = this.db.prepare('select session_id from source where agent = ? and key = ?').get(agent, key) as any
@@ -60,6 +69,8 @@ export class IndexStore {
       if (s) {
         const ins = this.db.prepare('insert into content (session_id, msg_index, msg_id, role, txt) values (?, ?, ?, ?, ?)')
         messages.forEach((m, i) => { const t = searchableText(m); if (t.trim()) ins.run(s.id, i, m.id, m.role, t) })
+        const day = this.db.prepare('insert into usage_day (session_id, agent, day, model, input, output, cache_read, cache_write, requests, cost) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+        for (const d of usageByDay(s, usage)) day.run(s.id, agent, d.day, d.model, d.input, d.output, d.cacheRead, d.cacheWrite, d.requests, d.cost ?? null)
       }
       this.db.exec('commit')
     } catch (e) {
@@ -79,6 +90,15 @@ export class IndexStore {
   private dropSession(id: string) {
     this.db.prepare('delete from session where id = ?').run(id)
     this.db.prepare('delete from content where session_id = ?').run(id)
+    this.db.prepare('delete from usage_day where session_id = ?').run(id)
+  }
+
+  /** tokens per day, session and model since a day (YYYY-MM-DD, inclusive) */
+  usage(since = ''): UsageDayRow[] {
+    return (this.db.prepare('select * from usage_day where day >= ? order by day').all(since) as any[]).map((r) => ({
+      day: r.day, sessionId: r.session_id, agent: r.agent, model: r.model, input: r.input, output: r.output,
+      cacheRead: r.cache_read, cacheWrite: r.cache_write, requests: r.requests, ...(r.cost != null && { cost: r.cost }),
+    }))
   }
 
   /** Terms of 3+ characters use the trigram index; shorter ones fall back to a substring scan. */

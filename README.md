@@ -189,6 +189,7 @@ design/playground/     the static design playground the UI was developed from (`
 |---|---|---|
 | GET | `/api/agents` | Agents with session counts, storage path, availability, capabilities |
 | GET | `/api/sessions` | Session summaries (with project, `pinned`, `active`) |
+| GET | `/api/usage?since=` | Tokens per day, session and model from the agents' own records (each call on the day it was made) |
 | GET | `/api/sessions/:id?cursor=&limit=` | One session, paged by whole turns (`limit=all` for the rest) |
 | GET | `/api/sessions/:id/{outline,edits,context,tree,changes,changes/file,find,images/:ref,resume-command,run}` | Session details |
 | GET | `/api/search?q=` | Full-text search across sessions |
@@ -198,7 +199,7 @@ design/playground/     the static design playground the UI was developed from (`
 | POST | `/api/sessions/:id/{pin,unpin,hide,restore,open,continue,delete-from-disk}` | Session actions (`open` takes `target`: `folder`, `terminal`, `editor`, `file`, `resume`) |
 | POST | `/api/sessions/:id/messages/{hide,restore}` · `/api/runs/:id/stop` · `/api/removed/:id/{restore,purge}` | Messages, runs, backups |
 
-| GET | `/api/control/state` · `/api/control/usage?days=` | Providers (keys masked), groups, agents and their bindings, gateway, member health · usage summary |
+| GET | `/api/control/state` · `/api/control/usage/days?since=` | Providers (keys masked), groups, agents and their bindings, gateway, member health · gateway tokens per day, agent, route and model |
 | POST · PUT · DELETE | `/api/control/providers[/:id[/refresh]]` · `/api/control/groups[/:id]` | Providers (model list read on add/refresh) · routing groups |
 | POST | `/api/control/bindings` · `/api/control/gateway/{key,rotate}` · `/api/control/snippet` | Which model an agent starts on · the gateway key · set-up snippet |
 | POST · GET | `/gateway/v1/{messages,chat/completions,responses}` · `/gateway/v1/models` | The gateway, for agents (gateway key, not the page token) |

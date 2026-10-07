@@ -1,7 +1,8 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { assertIdle, exists, moveAll, moveBack, type MovedEntry } from '../core/fsmove.ts'
-import { RemovalError, type AgentAdapter, type Block, type Message, type Session, type Source } from '../core/model.ts'
+import { RemovalError, type AgentAdapter, type Block, type Message, type Session, type Source, type UsageEntry } from '../core/model.ts'
+import { totalsOf } from '../core/usage.ts'
 import { cleanPrompt, derive, fallbackTitle, pickTitle } from '../core/derive.ts'
 import { argSafe, jsonlLines, localRoots, toMs, type Roots } from '../core/util.ts'
 
@@ -46,7 +47,7 @@ export const makeClaude = (roots: () => Roots = localRoots): AgentAdapter => {
     async summarize(source) {
       const s = await parse(source)
       if (!s) return null
-      const { messages, ...summary } = s
+      const { messages, usage, ...summary } = s
       return summary
     },
     load: (source) => parse(source),
@@ -119,7 +120,8 @@ async function parse(source: Source): Promise<Session | null> {
   let firstPrompt: string | undefined
   let first: number | undefined
   let last: number | undefined
-  const tokens = { input: 0, output: 0 }
+  // one entry per reply: a reply split over several lines repeats its usage, the last line's counts being final
+  const usage = new Map<string, UsageEntry>()
 
   if (isSub) {
     // …/<parentSessionId>/subagents/agent-x.jsonl
@@ -161,6 +163,10 @@ async function parse(source: Source): Promise<Session | null> {
             blocks.push(tb)
           }
         }
+        if (m?.usage && t) {
+          const u = m.usage
+          usage.set(m.id ?? o.uuid, { time: usage.get(m.id ?? o.uuid)?.time ?? t, model: m.model, input: u.input_tokens ?? 0, output: u.output_tokens ?? 0, cacheRead: u.cache_read_input_tokens ?? 0, cacheWrite: u.cache_creation_input_tokens ?? 0 })
+        }
         if (!blocks.length) break
         const prev = m?.id ? lastAssistantById.get(m.id) : undefined
         if (prev) prev.blocks.push(...blocks)
@@ -169,10 +175,6 @@ async function parse(source: Source): Promise<Session | null> {
           messages.push(msg)
           if (m?.id) lastAssistantById.set(m.id, msg)
           if (m?.model && m.model !== '<synthetic>') model = m.model
-          if (m?.usage) {
-            tokens.input += (m.usage.input_tokens ?? 0) + (m.usage.cache_read_input_tokens ?? 0) + (m.usage.cache_creation_input_tokens ?? 0)
-            tokens.output += m.usage.output_tokens ?? 0
-          }
         }
         break
       }
@@ -227,8 +229,9 @@ async function parse(source: Source): Promise<Session | null> {
     updatedAt: last ?? stat?.mtimeMs ?? 0,
     messageCount: messages.length,
     parentId,
-    tokens,
+    ...totalsOf([...usage.values()]),
     ...derive(messages),
     messages,
+    usage: [...usage.values()],
   }
 }

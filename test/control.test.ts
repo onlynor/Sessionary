@@ -95,9 +95,10 @@ test('rests: rate limits follow retry-after, a refused key rests long, a malform
 })
 
 test('usage is read from all three protocols', () => {
-  assert.deepEqual(usageOf({ usage: { input_tokens: 10, cache_read_input_tokens: 4, output_tokens: 2 } }), { input: 10, output: 2, cacheRead: 4 })
-  assert.deepEqual(usageOf({ usage: { prompt_tokens: 9, completion_tokens: 3, prompt_tokens_details: { cached_tokens: 1 } } }), { input: 9, output: 3, cacheRead: 1 })
-  assert.deepEqual(usageOf({ type: 'response.completed', response: { usage: { input_tokens: 5, output_tokens: 6, input_tokens_details: { cached_tokens: 2 } } } }), { input: 5, output: 6, cacheRead: 2 })
+  // one convention for all three: `input` is what was read fresh (OpenAI's counts include the cached tokens; Anthropic's do not)
+  assert.deepEqual(usageOf({ usage: { input_tokens: 10, cache_read_input_tokens: 4, cache_creation_input_tokens: 3, output_tokens: 2 } }), { input: 10, output: 2, cacheRead: 4, cacheWrite: 3 })
+  assert.deepEqual(usageOf({ usage: { prompt_tokens: 9, completion_tokens: 3, prompt_tokens_details: { cached_tokens: 1 } } }), { input: 8, output: 3, cacheRead: 1, cacheWrite: 0 })
+  assert.deepEqual(usageOf({ type: 'response.completed', response: { usage: { input_tokens: 5, output_tokens: 6, input_tokens_details: { cached_tokens: 2 } } } }), { input: 3, output: 6, cacheRead: 2, cacheWrite: 0 })
 })
 
 test('callers: the key names the agent; a wrong key is nobody', () => {

@@ -128,26 +128,30 @@ export class Router {
 }
 
 // ---------- usage ----------
-export interface Tokens { input: number; output: number; cacheRead: number }
+/** `input` is what was read fresh, not from the cache (the convention of core/model.ts's UsageEntry) */
+export interface Tokens { input: number; output: number; cacheRead: number; cacheWrite: number }
 const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : 0)
 
 /** the token counts in one reply object or stream event, whichever of the three protocols it is */
-export function usageOf(o: any, into: Tokens = { input: 0, output: 0, cacheRead: 0 }): Tokens {
+export function usageOf(o: any, into: Tokens = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }): Tokens {
   const u = o?.usage ?? o?.message?.usage ?? o?.response?.usage
   if (!u || typeof u !== 'object') return into
-  const input = num(u.input_tokens) + num(u.cache_creation_input_tokens) || num(u.prompt_tokens)
+  // OpenAI's counts (chat completions, responses) include the cached tokens in the input; Anthropic's do not
+  const openai = u.prompt_tokens != null || u.prompt_tokens_details != null || u.input_tokens_details != null
   const cache = num(u.cache_read_input_tokens) || num(u.prompt_tokens_details?.cached_tokens) || num(u.input_tokens_details?.cached_tokens)
+  const input = openai ? Math.max(0, (num(u.prompt_tokens) || num(u.input_tokens)) - cache) : num(u.input_tokens)
   const output = num(u.output_tokens) || num(u.completion_tokens)
   into.input = Math.max(into.input, input)
   into.output = Math.max(into.output, output)
   into.cacheRead = Math.max(into.cacheRead, cache)
+  into.cacheWrite = Math.max(into.cacheWrite, num(u.cache_creation_input_tokens))
   return into
 }
 
 /** passes a reply through untouched while reading the usage out of it */
 function tap(body: ReadableStream<Uint8Array>, sse: boolean, done: (t: Tokens, error?: string) => void): ReadableStream<Uint8Array> {
   const dec = new TextDecoder()
-  const tokens: Tokens = { input: 0, output: 0, cacheRead: 0 }
+  const tokens: Tokens = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
   let buf = ''
   let whole = ''
   let finished = false
@@ -303,7 +307,7 @@ export function createGateway(o: GatewayOptions) {
         emit({ id, at: Date.now(), agent, target, protocol, phase: 'failed', member: cand.member, status: res.status, why: rest?.why ?? 'request-refused' })
         // the agent's own request was refused, or there is no one else: the upstream's answer goes back as it is
         if (!rest || isLast) {
-          store.addUsage({ at: t0, agent, target, provider: cand.provider.id, model: cand.model, protocol, status: res.status, ms: Date.now() - t0, input: 0, output: 0, cacheRead: 0, error: rest?.why ?? 'request-refused', tries })
+          store.addUsage({ at: t0, agent, target, provider: cand.provider.id, model: cand.model, protocol, status: res.status, ms: Date.now() - t0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, error: rest?.why ?? 'request-refused', tries })
           return passBack(res)
         }
         lastFail = res
@@ -318,7 +322,7 @@ export function createGateway(o: GatewayOptions) {
         router.end(cand.member)
         c.req.raw.signal?.removeEventListener('abort', onAbort)
         const ms = Date.now() - t0
-        if (path !== '/v1/messages/count_tokens') store.addUsage({ at: t0, agent, target, provider: cand.provider.id, model: cand.model, protocol, status: res.status, ms, input: tk.input, output: tk.output, cacheRead: tk.cacheRead, error, tries })
+        if (path !== '/v1/messages/count_tokens') store.addUsage({ at: t0, agent, target, provider: cand.provider.id, model: cand.model, protocol, status: res.status, ms, input: tk.input, output: tk.output, cacheRead: tk.cacheRead, cacheWrite: tk.cacheWrite, error, tries })
         emit({ id, at: Date.now(), agent, target, protocol, phase: 'done', member: cand.member, status: res.status, ms, input: tk.input, output: tk.output, ...(error && { why: error }) })
       }) : (router.end(cand.member), null)
       const h = new Headers()
@@ -328,7 +332,7 @@ export function createGateway(o: GatewayOptions) {
     }
 
     const last = plan.candidates.at(-1)!
-    store.addUsage({ at: t0, agent, target, provider: last.provider.id, model: last.model, protocol, status: lastFail?.status ?? 502, ms: Date.now() - t0, input: 0, output: 0, cacheRead: 0, error: lastError || 'unreachable', tries })
+    store.addUsage({ at: t0, agent, target, provider: last.provider.id, model: last.model, protocol, status: lastFail?.status ?? 502, ms: Date.now() - t0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, error: lastError || 'unreachable', tries })
     return c.json(errorBody(protocol, `No model in ${target} could answer: ${lastError || 'unreachable'}`, 'api_error'), 502)
   })
 

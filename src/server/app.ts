@@ -388,9 +388,15 @@ export function createApp(store: IndexStore, webRoot?: string, overlay: OverlayS
     const all = c.req.query('limit') === 'all'
     const page = pageMessages(s.messages, Number(c.req.query('cursor') ?? 0) || 0, all ? Infinity : Number(c.req.query('limit')) || PAGE_SIZE)
     const messages = s.messages.slice(page.start, page.end).map((m, i) => prepare(m, page.start + i))
-    const { messages: _, ...summary } = s
+    const { messages: _, usage: __, ...summary } = s
     const [deco] = await decorate([summary as SessionSummary])
     return c.json({ ...deco, messages, page, children: page.start === 0 ? visible(store.children(id)) : [], trashed: overlay.hiddenSessions().has(id) })
+  })
+
+  // tokens per day, session and model, from the agents' own records (`since` YYYY-MM-DD); a node's comes through the proxy
+  app.get('/api/usage', (c) => {
+    const since = c.req.query('since') ?? ''
+    return c.json(store.usage(/^\d{4}-\d{2}-\d{2}$/.test(since) ? since : ''))
   })
 
   // the reader's prompts, for the jump-to index beside the conversation (covers pages not loaded yet)

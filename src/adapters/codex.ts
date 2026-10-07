@@ -1,7 +1,8 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { DatabaseSync } from '../core/sqlite.ts'
-import type { AgentAdapter, Block, Message, Session, Source } from '../core/model.ts'
+import type { AgentAdapter, Block, Message, Session, Source, UsageEntry } from '../core/model.ts'
+import { totalsOf } from '../core/usage.ts'
 import { cleanPrompt, derive, fallbackTitle, pickTitle } from '../core/derive.ts'
 import { argSafe, jsonlLines, localRoots, toMs, type Roots } from '../core/util.ts'
 
@@ -104,7 +105,10 @@ export const makeCodex = (roots: () => Roots = localRoots): AgentAdapter => {
     const tools = new Map<string, Extract<Block, { type: 'tool' }>>()
     let turn: Message | undefined
     let model: string | undefined
-    let tokens: { input: number; output: number } | undefined
+    // Codex records running totals (OpenAI's convention: cached tokens are part of the input, reasoning part of the
+    // output); each call is the difference from the previous total
+    const usage: UsageEntry[] = []
+    let seen = { input: 0, cached: 0, write: 0, output: 0 }
     let firstPrompt: string | undefined
     let last = toMs(m.timestamp)
     const startTurn = (rid: string, time?: number) => (turn = { id: rid, role: 'assistant', time, model, blocks: [] })
@@ -127,7 +131,12 @@ export const makeCodex = (roots: () => Roots = localRoots): AgentAdapter => {
         if (p.type === 'user_message') user(String(p.message ?? ''), rid, time)
         else if (p.type === 'token_count' && p.info?.total_token_usage) {
           const u = p.info.total_token_usage
-          tokens = { input: (u.input_tokens ?? 0) + (u.cached_input_tokens ?? 0), output: (u.output_tokens ?? 0) + (u.reasoning_output_tokens ?? 0) }
+          const now = { input: u.input_tokens ?? 0, cached: u.cached_input_tokens ?? 0, write: u.cache_write_input_tokens ?? 0, output: u.output_tokens ?? 0 }
+          // a total that went down started over (a new process): all of it is new
+          const from = now.input < seen.input || now.output < seen.output ? { input: 0, cached: 0, write: 0, output: 0 } : seen
+          const d = { input: now.input - from.input, cached: Math.max(0, now.cached - from.cached), write: Math.max(0, now.write - from.write), output: now.output - from.output }
+          if ((d.input || d.output) && time) usage.push({ time, model, input: Math.max(0, d.input - d.cached - d.write), output: d.output, cacheRead: d.cached, cacheWrite: d.write })
+          seen = now
         } else if (p.type === 'error' && p.message) push({ type: 'note', kind: 'error', text: String(p.message) }, rid, time)
         return
       }
@@ -199,9 +208,10 @@ export const makeCodex = (roots: () => Roots = localRoots): AgentAdapter => {
       createdAt: created,
       updatedAt: last ?? created,
       messageCount: messages.length,
-      tokens,
+      ...totalsOf(usage),
       ...derive(messages),
       messages,
+      usage,
     }
   }
 
@@ -221,7 +231,7 @@ export const makeCodex = (roots: () => Roots = localRoots): AgentAdapter => {
     async summarize(source) {
       const s = await parse(source)
       if (!s) return null
-      const { messages, ...summary } = s
+      const { messages, usage, ...summary } = s
       return summary
     },
     load: parse,

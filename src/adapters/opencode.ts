@@ -3,7 +3,8 @@ import path from 'node:path'
 import { DatabaseSync } from '../core/sqlite.ts'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { RemovalError, type AgentAdapter, type Block, type Message, type Session, type SessionSummary, type Source } from '../core/model.ts'
+import { RemovalError, type AgentAdapter, type Block, type Message, type Session, type SessionSummary, type Source, type UsageEntry } from '../core/model.ts'
+import { totalsOf } from '../core/usage.ts'
 import { derive, pickTitle } from '../core/derive.ts'
 import { argSafe, localRoots, type Roots } from '../core/util.ts'
 
@@ -91,7 +92,7 @@ export const makeOpencode = (roots: () => Roots = localRoots): AgentAdapter => {
     async summarize(source) {
       const s = await self.load(source)
       if (!s) return null
-      const { messages, ...summary } = s
+      const { messages, usage, ...summary } = s
       return summary
     },
 
@@ -109,9 +110,13 @@ export const makeOpencode = (roots: () => Roots = localRoots): AgentAdapter => {
         }
 
         const messages: Message[] = []
+        // each reply's own counts (OpenCode's input already leaves the cache out; reasoning is kept apart from output)
+        const usage: UsageEntry[] = []
         for (const m of msgs) {
           let d: any
           try { d = JSON.parse(m.data) } catch { continue }
+          const k = d.role === 'assistant' ? d.tokens : undefined
+          if (k) usage.push({ time: d.time?.created ?? m.time_created, model: d.modelID, input: k.input ?? 0, output: (k.output ?? 0) + (k.reasoning ?? 0), cacheRead: k.cache?.read ?? 0, cacheWrite: k.cache?.write ?? 0, ...(typeof d.cost === 'number' && { cost: d.cost }) })
           const blocks: Block[] = []
           for (const p of byMsg.get(m.id) ?? []) {
             switch (p.type) {
@@ -150,7 +155,7 @@ export const makeOpencode = (roots: () => Roots = localRoots): AgentAdapter => {
         }
         const firstPrompt = messages.find((m) => m.role === 'user')?.blocks.find((b) => b.type === 'text')
         const title = pickTitle([summary.title], firstPrompt?.type === 'text' ? firstPrompt.text : undefined, summary.title)
-        return { ...summary, title, messageCount: messages.length, ...derive(messages), messages }
+        return { ...summary, title, messageCount: messages.length, ...totalsOf(usage), ...derive(messages), messages, usage }
       }, null)
     },
 

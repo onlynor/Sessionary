@@ -6,7 +6,7 @@ import { agentModelState, launchProfile, PROTOCOL_OF, ROUTABLE, snippet, type La
 import { detectMagpie, listModels, mergeModels } from './catalog.ts'
 import { createGateway, type RouteEvent, Router, sameSecret } from './gateway.ts'
 import { PRESETS, presetOf } from './presets.ts'
-import { ControlError, type ControlStore, type Group, maskKey, MODEL_RE, PROTOCOLS, type Protocol, type Provider, slug, validEndpoint, type UsageRow } from './store.ts'
+import { ControlError, type ControlStore, type Group, maskKey, MODEL_RE, PROTOCOLS, type Protocol, type Provider, slug, validEndpoint } from './store.ts'
 
 /**
  * Model Control's HTTP side: `/gateway/*` for agents (its own key), `/api/control/*` for the page (the app's token
@@ -24,36 +24,7 @@ export interface ControlOptions {
 }
 
 const publicProvider = (p: Provider) => ({ ...p, key: maskKey(p.key), hasKey: !!p.key })
-const DAY = 86_400_000
-
-/** usage rows summed the ways the Usage page shows them */
-export function summarize(rows: UsageRow[]) {
-  const totals = { calls: rows.length, failed: 0, input: 0, output: 0, cacheRead: 0, ms: 0, rerouted: 0 }
-  const by = <K extends string>(key: (r: UsageRow) => K) => {
-    const m = new Map<K, { key: K; calls: number; input: number; output: number; cacheRead: number; failed: number }>()
-    for (const r of rows) {
-      const k = key(r)
-      const e = m.get(k) ?? { key: k, calls: 0, input: 0, output: 0, cacheRead: 0, failed: 0 }
-      e.calls++; e.input += r.input; e.output += r.output; e.cacheRead += r.cacheRead; if (r.status >= 400 || r.error) e.failed++
-      m.set(k, e)
-    }
-    return [...m.values()].sort((a, b) => b.input + b.output - (a.input + a.output) || b.calls - a.calls)
-  }
-  for (const r of rows) {
-    totals.input += r.input; totals.output += r.output; totals.cacheRead += r.cacheRead; totals.ms += r.ms
-    if (r.status >= 400 || r.error) totals.failed++
-    if (r.tries > 1) totals.rerouted++
-  }
-  const day = (at: number) => { const d = new Date(at); d.setHours(0, 0, 0, 0); return String(d.getTime()) }
-  return {
-    totals,
-    byDay: by((r) => day(r.at)).sort((a, b) => Number(a.key) - Number(b.key)),
-    byModel: by((r) => `${r.provider}/${r.model}`),
-    byAgent: by((r) => r.agent),
-    byTarget: by((r) => r.target),
-    recent: rows.slice(0, 40),
-  }
-}
+const DAY_RE = /^\d{4}-\d{2}-\d{2}$/
 
 /** a port for one session's tunnel on a node: random in a range services rarely use, so two sessions do not collide */
 export const tunnelPort = () => 20_000 + Math.floor(Math.random() * 30_000)
@@ -252,11 +223,8 @@ export function registerControl(app: Hono, o: ControlOptions) {
   })
 
   // ---- usage ----
-  app.get('/api/control/usage', (c) => {
-    const days = Number(c.req.query('days') ?? 30)
-    const since = days > 0 ? Date.now() - days * DAY : 0
-    return c.json(summarize(store.usage(since)))
-  })
+  /** per day, agent, route and model: what the Usage page draws (`since` YYYY-MM-DD) */
+  app.get('/api/control/usage/days', (c) => c.json(store.usageDays(DAY_RE.test(c.req.query('since') ?? '') ? c.req.query('since') : '')))
 
   /**
    * What Sessionary adds when it starts this agent itself (a terminal, a chat); nothing when it is not bound. On this

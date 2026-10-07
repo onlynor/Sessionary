@@ -31,7 +31,7 @@ test('codex: a rollout becomes a conversation with commands, patches, reasoning 
     { timestamp: '2026-08-01T10:00:06.000Z', type: 'response_item', payload: { type: 'custom_tool_call', name: 'apply_patch', call_id: 'c2', input: '*** Begin Patch\n*** Update File: src/a.ts\n@@\n-old\n+new\n*** Add File: src/b.ts\n+hello\n*** End Patch' } },
     { timestamp: '2026-08-01T10:00:07.000Z', type: 'response_item', payload: { type: 'custom_tool_call_output', call_id: 'c2', output: 'Success. Updated the following files' } },
     { timestamp: '2026-08-01T10:00:08.000Z', type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Fixed it.' }] } },
-    { timestamp: '2026-08-01T10:00:09.000Z', type: 'event_msg', payload: { type: 'token_count', info: { total_token_usage: { input_tokens: 100, cached_input_tokens: 50, output_tokens: 20, reasoning_output_tokens: 5, total_tokens: 175 } } } },
+    { timestamp: '2026-08-01T10:00:09.000Z', type: 'event_msg', payload: { type: 'token_count', info: { total_token_usage: { input_tokens: 100, cached_input_tokens: 50, output_tokens: 20, reasoning_output_tokens: 5, total_tokens: 120 } } } },
   ))
   const a = makeCodex(roots)
   const [src] = await a.listSources()
@@ -42,7 +42,9 @@ test('codex: a rollout becomes a conversation with commands, patches, reasoning 
   assert.equal(s.cwd, '/srv/app')
   assert.equal(s.gitBranch, 'main')
   assert.equal(s.model, 'gpt-5-codex')
-  assert.deepEqual(s.tokens, { input: 150, output: 25 })
+  // Codex counts the cached tokens inside the input and reasoning inside the output (OpenAI's convention): not twice
+  assert.deepEqual(s.tokens, { input: 100, output: 20 })
+  assert.deepEqual(s.usage?.map(({ input, cacheRead, output }) => ({ input, cacheRead, output })), [{ input: 50, cacheRead: 50, output: 20 }])
   assert.equal(s.filesChanged, 1) // the patch counts once, as one tool call with a path
   assert.equal(s.messages.length, 2) // what was typed, then everything the agent did for it
   assert.ok(!JSON.stringify(s.messages).includes('environment_context'))

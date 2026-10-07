@@ -24,7 +24,7 @@ export async function scan(adapters: AgentAdapter[], store: IndexStore): Promise
       try {
         // one full read per changed source: the summary and the full-text rows come from the same parse
         const full = await a.load(s)
-        if (full) { const { messages, ...summary } = full; store.upsert(a.id, s.key, s.fingerprint, summary, messages); changed.push(summary.id) }
+        if (full) { const { messages, usage, ...summary } = full; store.upsert(a.id, s.key, s.fingerprint, summary, messages, usage); changed.push(summary.id) }
         else store.upsert(a.id, s.key, s.fingerprint, null)
         updated++
       } catch (e) {

@@ -3,6 +3,7 @@ import path from 'node:path'
 import { randomBytes } from 'node:crypto'
 import { DatabaseSync } from '../sqlite.ts'
 import { dataHome } from '../util.ts'
+import type { UsageDayRow } from '../usage.ts'
 
 /**
  * Model Control: the user's providers, models, routing groups and which agent uses which. Like the overlay this is
@@ -41,7 +42,7 @@ export interface Binding { agent: string; target: string; at: number }
 
 export interface UsageRow {
   at: number; agent: string; target: string; provider: string; model: string; protocol: Protocol
-  status: number; ms: number; input: number; output: number; cacheRead: number; error?: string; tries: number
+  status: number; ms: number; input: number; output: number; cacheRead: number; cacheWrite: number; error?: string; tries: number
 }
 
 export const MODEL_RE = /^[\w.:@+-][\w.:@+/-]{0,199}$/
@@ -106,6 +107,13 @@ export class ControlStore {
       );
       create index if not exists usage_at on usage(at);
     `)
+    // rows written before cache writes were counted kept OpenAI-style input (cached tokens included): those are
+    // corrected once, when the column arrives (Anthropic rows then counted cache writes as input: left as they are)
+    const cols = (this.db.prepare('pragma table_info(usage)').all() as any[]).map((c) => c.name)
+    if (!cols.includes('cache_write')) {
+      this.db.exec(`alter table usage add column cache_write integer not null default 0;
+        update usage set input = max(0, input - cache_read) where protocol in ('chat', 'responses');`)
+    }
   }
 
   // ---- providers ----
@@ -174,17 +182,29 @@ export class ControlStore {
 
   // ---- usage ----
   addUsage(u: UsageRow) {
-    this.db.prepare('insert into usage (at, agent, target, provider, model, protocol, status, ms, input, output, cache_read, error, tries) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-      .run(u.at, u.agent, u.target, u.provider, u.model, u.protocol, u.status, u.ms, u.input, u.output, u.cacheRead, u.error ?? null, u.tries)
+    this.db.prepare('insert into usage (at, agent, target, provider, model, protocol, status, ms, input, output, cache_read, cache_write, error, tries) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(u.at, u.agent, u.target, u.provider, u.model, u.protocol, u.status, u.ms, u.input, u.output, u.cacheRead, u.cacheWrite, u.error ?? null, u.tries)
   }
   usage(since = 0, limit = 5000): UsageRow[] {
     return (this.db.prepare('select * from usage where at >= ? order by at desc limit ?').all(since, limit) as any[]).map((r) => ({
       at: r.at, agent: r.agent, target: r.target, provider: r.provider, model: r.model, protocol: r.protocol, status: r.status, ms: r.ms,
-      input: r.input, output: r.output, cacheRead: r.cache_read, tries: r.tries, ...(r.error != null && { error: r.error }),
+      input: r.input, output: r.output, cacheRead: r.cache_read, cacheWrite: r.cache_write, tries: r.tries, ...(r.error != null && { error: r.error }),
     }))
   }
-  /** keeps the table from growing without end: what is older than `keepMs` goes */
-  pruneUsage(keepMs = 90 * 86_400_000) { this.db.prepare('delete from usage where at < ?').run(Date.now() - keepMs) }
+  /** requests per day (this computer's time zone), agent, route and model since a day (YYYY-MM-DD) */
+  usageDays(since = ''): UsageDayRow[] {
+    const from = since ? new Date(`${since}T00:00:00`).getTime() : 0
+    return (this.db.prepare(`
+      select strftime('%Y-%m-%d', at / 1000, 'unixepoch', 'localtime') as day, agent, target, provider, model,
+        count(*) as requests, sum(status >= 400 or error is not null) as failed, sum(input) as input, sum(output) as output,
+        sum(cache_read) as cache_read, sum(cache_write) as cache_write
+      from usage where at >= ? group by day, agent, target, provider, model order by day`).all(from) as any[]).map((r) => ({
+      day: r.day, agent: r.agent, route: r.target, model: `${r.provider}/${r.model}`, requests: r.requests, failed: r.failed,
+      input: r.input, output: r.output, cacheRead: r.cache_read, cacheWrite: r.cache_write,
+    }))
+  }
+  /** keeps the table from growing without end: what is older than `keepMs` goes (a year and a bit: the Usage page shows a year) */
+  pruneUsage(keepMs = 400 * 86_400_000) { this.db.prepare('delete from usage where at < ?').run(Date.now() - keepMs) }
 
   close() { this.db.close() }
 }

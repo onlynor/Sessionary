@@ -59,7 +59,17 @@ export interface SessionSummary {
 
 export interface Session extends SessionSummary {
   messages: Message[]
+  /** each model call's tokens as the agent recorded them, when it records them per call (see core/usage.ts) */
+  usage?: UsageEntry[]
 }
+
+/**
+ * One model call's tokens. `input` is what the model read fresh — not what came from the prompt cache, which is
+ * `cacheRead` (and `cacheWrite`, what was written to it); `output` includes reasoning. Every adapter converts its
+ * agent's own convention to this one (OpenAI-style counts include the cached tokens in the input; Anthropic-style
+ * do not).
+ */
+export interface UsageEntry { time: number; model?: string; input: number; output: number; cacheRead: number; cacheWrite: number; cost?: number }
 
 /** Something an adapter can turn into one session; `fingerprint` changes whenever the content does. */
 export interface Source {

@@ -1,7 +1,8 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { assertIdle, moveAll, moveBack, type MovedEntry } from '../core/fsmove.ts'
-import type { AgentAdapter, Block, Message, Session, Source } from '../core/model.ts'
+import type { AgentAdapter, Block, Message, Session, Source, UsageEntry } from '../core/model.ts'
+import { totalsOf } from '../core/usage.ts'
 import { cleanPrompt, derive, fallbackTitle, pickTitle } from '../core/derive.ts'
 import { argSafe, jsonlLines, localRoots, toMs, type Roots } from '../core/util.ts'
 
@@ -36,7 +37,7 @@ export const makePi = (roots: () => Roots = localRoots): AgentAdapter => {
     async summarize(source) {
       const s = await parse(source)
       if (!s) return null
-      const { messages, ...summary } = s
+      const { messages, usage, ...summary } = s
       return summary
     },
     load: (source) => parse(source),
@@ -102,8 +103,7 @@ async function parse(source: Source): Promise<Session | null> {
   const messages: Message[] = []
   const tools = new Map<string, Extract<Block, { type: 'tool' }>>()
   let model: string | undefined
-  let cost = 0
-  const tokens = { input: 0, output: 0 }
+  const usage: UsageEntry[] = []
   let firstPrompt: string | undefined
   let last = toMs(header.timestamp)
 
@@ -140,11 +140,8 @@ async function parse(source: Source): Promise<Session | null> {
         }
         if (m.errorMessage && !blocks.length) blocks.push({ type: 'note', kind: 'error', text: m.errorMessage })
         if (m.model) model = m.model
-        if (m.usage) {
-          tokens.input += (m.usage.input ?? 0) + (m.usage.cacheRead ?? 0)
-          tokens.output += m.usage.output ?? 0
-          cost += m.usage.cost?.total ?? 0
-        }
+        // Pi's input leaves the cache out, as Anthropic's does
+        if (m.usage && t) usage.push({ time: t, model: m.model, input: m.usage.input ?? 0, output: m.usage.output ?? 0, cacheRead: m.usage.cacheRead ?? 0, cacheWrite: m.usage.cacheWrite ?? 0, ...(typeof m.usage.cost?.total === 'number' && { cost: m.usage.cost.total }) })
         if (blocks.length) messages.push({ id: e.id, role: 'assistant', time: t, model: m.model, blocks })
         break
       }
@@ -178,9 +175,9 @@ async function parse(source: Source): Promise<Session | null> {
     createdAt: created,
     updatedAt: last ?? created,
     messageCount: messages.length,
-    tokens,
-    cost,
+    ...totalsOf(usage),
     ...derive(messages),
     messages,
+    usage,
   }
 }

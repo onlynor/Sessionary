@@ -51,7 +51,7 @@ export const makeHermes = (roots: () => Roots = localRoots): AgentAdapter => {
     async summarize(source) {
       const s = await self.load(source)
       if (!s) return null
-      const { messages, ...summary } = s
+      const { messages, usage, ...summary } = s
       return summary
     },
 
@@ -114,6 +114,8 @@ export const makeHermes = (roots: () => Roots = localRoots): AgentAdapter => {
           cost: r.actual_cost_usd ?? r.estimated_cost_usd ?? undefined,
           ...derive(messages),
           messages,
+          // Hermes keeps one total per session: it counts on the day the session was last active
+          usage: [{ time: Math.max(updated, created), model: r.model || undefined, input: r.input_tokens ?? 0, output: (r.output_tokens ?? 0) + (r.reasoning_tokens ?? 0), cacheRead: r.cache_read_tokens ?? 0, cacheWrite: r.cache_write_tokens ?? 0, ...(typeof (r.actual_cost_usd ?? r.estimated_cost_usd) === 'number' && { cost: r.actual_cost_usd ?? r.estimated_cost_usd }) }],
         }
       }, null)
     },
