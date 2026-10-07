@@ -443,8 +443,11 @@ export function Conversation(p: Props) {
   return (
     <main className="content">
       <header className={`toolbar ${scrolled || p.view === 'changes' ? 'edge' : ''}`}>
-        {p.crumbs}
-        <div className="tb-title" title={s.title} aria-hidden={!scrolled && p.view !== 'changes'}>{cleanTitle(s.title)}</div>
+        {/* the crumbs and, once scrolled, the title: together they stay left of the centred switch */}
+        <div className="tb-lead">
+          {p.crumbs}
+          <div className="tb-title" title={s.title} aria-hidden={!scrolled && p.view !== 'changes'}>{cleanTitle(s.title)}</div>
+        </div>
         <div className="seg tb-center" role="tablist" aria-label={t('View')}>
           <button role="tab" aria-selected={p.view === 'chat'} className={p.view === 'chat' ? 'on' : ''} onClick={() => p.onView('chat')}>{t('Conversation')}</button>
           <button role="tab" aria-selected={p.view === 'changes'} className={p.view === 'changes' ? 'on' : ''} onClick={() => p.onView('changes')}>

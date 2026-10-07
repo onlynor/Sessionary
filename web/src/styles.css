@@ -345,8 +345,13 @@ html.resizing, html.resizing * { cursor: col-resize !important; user-select: non
 .toolbar { height: 52px; flex: none; display: flex; align-items: center; gap: var(--s2); padding: 0 var(--s3) 0 var(--s5); position: relative; z-index: 3; background: var(--bg-main); box-shadow: 0 1px 0 transparent; transition: box-shadow var(--t-mid); }
 .toolbar.edge { box-shadow: 0 1px 0 var(--line); }
 .toolbar > .tb-btn:first-child { margin-left: calc(var(--s3) * -1); }
-.tb-title { min-width: 0; max-width: calc(50% - 160px); font-size: var(--fs-3); font-weight: 700; letter-spacing: -0.015em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; opacity: 0; transform: translateY(6px); transition: opacity var(--t-mid), transform var(--t-mid) var(--ease); }
+.tb-lead { display: flex; align-items: center; gap: var(--s2); min-width: 0; max-width: calc(50% - 130px); }
+.tb-lead .crumbs { flex: 0 1 auto; }
+/* what the crumbs leave, and no more */
+.tb-title { flex: 1 1 0; min-width: 0; font-size: var(--fs-3); font-weight: 700; letter-spacing: -0.015em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; opacity: 0; transform: translateY(6px); transition: opacity var(--t-mid), transform var(--t-mid) var(--ease); }
 .toolbar.edge .tb-title { opacity: 1; transform: none; }
+/* below this the crumbs leave the title a sliver: they are enough on their own */
+@container doc (max-width: 1000px) { .tb-title { display: none; } }
 .tb-center { position: absolute; left: 50%; transform: translateX(-50%); }
 .tb-actions { display: flex; gap: 0; margin-left: auto; }
 .tb-group { padding: 2px; border-radius: 10px; background: var(--fill); }
@@ -766,6 +771,7 @@ table.diff td.add .ichg { background: color-mix(in srgb, var(--success) 30%, tra
   .toolbar { padding: 0 var(--s2) 0 var(--s3); }
   .toolbar > .tb-btn:first-child { margin-left: 0; }
   .tb-title { display: none; }
+  .tb-lead { max-width: 45%; }
   .tb-center { position: static; transform: none; margin: 0 auto 0 var(--s1); min-width: 0; }
   .tb-center button { padding: 0 var(--s2); }
   .tb-opt { display: none; }
@@ -1023,7 +1029,7 @@ a { color: inherit; text-decoration: none; }
 .crumb-link { padding: 2px var(--s1); border-radius: var(--r1); color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px; }
 .crumb-link:hover { color: var(--text); background: var(--hover); }
 .crumb-here { padding: 2px var(--s1); color: var(--text); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 280px; }
-.toolbar .crumbs { max-width: 42%; flex-wrap: nowrap; }
+.toolbar .crumbs { flex-wrap: nowrap; } /* bounded by .tb-lead */
 .tabs { display: flex; gap: 2px; margin: var(--s4) 0 var(--s5); box-shadow: 0 1px 0 var(--line); overflow-x: auto; }
 .tab { display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 var(--s3); font-size: var(--fs-2); font-weight: 500; color: var(--text-2); border-bottom: 2px solid transparent; margin-bottom: -1px; white-space: nowrap; }
 .tab:hover { color: var(--text); }
