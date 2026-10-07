@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { getLang, t, useT } from './i18n'
 import { AgentIcon } from './AgentIcon'
 import type { Api } from './api'
@@ -9,6 +9,7 @@ import { Icon } from './Icon'
 import { NO_PROJECT, projectKey, ProjectScope } from './ProjectScope'
 import { Popover } from './SettingsMenu'
 import { Snippet } from './Snippet'
+import { ToolbarSlot, ToolbarTools } from './ui'
 import type { Agent, SearchHit, SessionSummary } from './types'
 
 export type Sort = 'updated' | 'created' | 'messages' | 'title'
@@ -116,12 +117,16 @@ export function SessionList(p: Props) {
   }, [hits, visible, sessions, agent, scope])
 
   const lang = getLang()
+  // what is being worked on right now leads the page, as cards; it is not repeated in the day it belongs to
+  const live = useMemo(() => (show === 'all' && !tokens.length ? visible.filter((s) => s.active).slice(0, 6) : []), [visible, show, filter])
   const groups = useMemo(() => {
-    const pins = show === 'all' && !tokens.length ? visible.filter((s) => s.pinned) : []
-    const rest = pins.length ? visible.filter((s) => !s.pinned) : visible
+    const liveIds = new Set(live.map((s) => s.id))
+    const base = liveIds.size ? visible.filter((s) => !liveIds.has(s.id)) : visible
+    const pins = show === 'all' && !tokens.length ? base.filter((s) => s.pinned) : []
+    const rest = pins.length ? base.filter((s) => !s.pinned) : base
     const g = groupSessions(rest, groupBy, sort)
     return pins.length ? [{ key: 'pinned', title: t('Pinned'), items: pins, pinned: true }, ...g] : g
-  }, [visible, groupBy, sort, show, filter, lang])
+  }, [visible, live, groupBy, sort, show, filter, lang])
   const isOpen = (g: Group) => !!filter || (toggled[g.key] ?? true)
 
   useEffect(() => {
@@ -137,86 +142,125 @@ export function SessionList(p: Props) {
 
   const custom = sort !== 'updated' || groupBy !== 'date' || show !== 'all'
   const time = (s: SessionSummary) => relTime(sort === 'created' ? s.createdAt : s.updatedAt)
+  const menuAt = (e: React.MouseEvent, s: SessionSummary) => { e.stopPropagation(); const r = (e.currentTarget as HTMLElement).getBoundingClientRect(); setMenu({ x: Math.max(8, r.right - 220), y: r.bottom + 4, s }) }
+  const facts = (s: SessionSummary) => (
+    <span className="sx-meta">
+      {!s.project.generic && <span className="sx-fact"><Icon name="folder" size={11} />{s.project.name}</span>}
+      {s.gitBranch && <span className="sx-fact"><Icon name="branch" size={11} />{s.gitBranch}</span>}
+      <span className="sx-fact">{t(s.messageCount === 1 ? '{n} message' : '{n} messages', { n: s.messageCount })}</span>
+    </span>
+  )
   const row = (s: SessionSummary) => (
-    <button key={s.id} className={`srow ${menu?.s.id === s.id ? 'menu-target' : ''}`} onClick={() => p.onOpen(s)}
+    <button key={s.id} className={`sx-entry ${menu?.s.id === s.id ? 'menu-target' : ''}`} onClick={() => p.onOpen(s)}
       onContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, s }) }}
       title={[s.title, s.preview, fullTime(s.updatedAt)].filter(Boolean).join('\n\n')}>
-      <AgentIcon agent={s.agent} size={16} />
-      <span className="srow-main">
-        <span className="srow-title"><span className="srow-text">{cleanTitle(s.title)}</span>{s.pinned && <span className="row-pin" title={t('Pinned')}><Icon name="pin" size={12} /></span>}{s.active && <span className="live-dot" title={t('Active now')} />}</span>
-        <span className="srow-sub">{s.preview ? plainText(s.preview) : s.project.generic ? t('No project') : s.project.name}</span>
+      <span className={`sx-tile at-${s.agent}`}><AgentIcon agent={s.agent} size={17} /></span>
+      <span className="sx-body">
+        <span className="sx-top">
+          <span className="sx-title">{cleanTitle(s.title)}</span>
+          {s.pinned && <span className="row-pin" title={t('Pinned')}><Icon name="pin" size={12} /></span>}
+          {s.active && <span className="live-dot" title={t('Active now')} />}
+          <span className="sx-time">{time(s)}</span>
+        </span>
+        {s.preview && <span className="sx-preview">{plainText(s.preview)}</span>}
+        {facts(s)}
       </span>
-      <span className="srow-proj">{s.project.generic ? '' : s.project.name}{s.gitBranch && <span className="row-branch"> · {s.gitBranch}</span>}</span>
-      <span className="srow-n">{t('{n} messages', { n: s.messageCount })}</span>
-      <span className="srow-time">{time(s)}</span>
-      <span className="srow-more" role="button" tabIndex={-1} aria-label={t('More actions')} onClick={(e) => { e.stopPropagation(); const r = e.currentTarget.getBoundingClientRect(); setMenu({ x: Math.max(8, r.right - 220), y: r.bottom + 4, s }) }}><Icon name="more" size={15} /></span>
+      <span className="sx-more" role="button" tabIndex={-1} aria-label={t('More actions')} onClick={(e) => menuAt(e, s)}><Icon name="more" size={15} /></span>
+    </button>
+  )
+  // a session being worked on now: a card with room for what it last said
+  const liveCard = (s: SessionSummary) => (
+    <button key={s.id} className={`sx-live ${menu?.s.id === s.id ? 'menu-target' : ''}`} onClick={() => p.onOpen(s)}
+      onContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, s }) }} title={fullTime(s.updatedAt)}>
+      <span className="sx-live-head">
+        <span className={`sx-tile at-${s.agent}`}><AgentIcon agent={s.agent} size={17} /></span>
+        <span className="sx-live-state"><span className="live-dot" />{t('Active now')}</span>
+        <span className="sx-time">{time(s)}</span>
+      </span>
+      <span className="sx-live-title">{cleanTitle(s.title)}</span>
+      {s.preview && <span className="sx-live-preview">{plainText(s.preview)}</span>}
+      {facts(s)}
     </button>
   )
 
   const agentsWith = agents.filter((a) => sessions.some((s) => s.agent === a.id))
+  const slot = useContext(ToolbarSlot)
+  const scopeControls = (
+    <>
+      {p.onAgent && (
+        <span className="seg sm" role="radiogroup" aria-label={t('Agents')}>
+          <button role="radio" aria-checked={!agent} className={!agent ? 'on' : ''} onClick={() => p.onAgent!('')}>{t('All agents')}</button>
+          {agentsWith.map((a) => <button key={a.id} role="radio" aria-checked={agent === a.id} className={agent === a.id ? 'on' : ''} onClick={() => p.onAgent!(a.id)}><AgentIcon agent={a.id} size={12} />{a.label}</button>)}
+        </span>
+      )}
+      {p.onProject && <ProjectScope sessions={own} value={scope} onChange={p.onProject} />}
+    </>
+  )
+  const tools = (
+    <>
+      <label className="field lt-search">
+        {searching ? <span className="spinner" /> : <Icon name="search" size={14} />}
+        <input ref={filterRef} value={filter} onChange={(e) => setFilter(e.target.value)} placeholder={t('Search titles and messages')} aria-label={t('Search titles and messages')} spellCheck={false}
+          onKeyDown={(e) => { if (e.key === 'Escape') { setFilter(''); e.currentTarget.blur() } else if (e.key === 'Enter' && visible[0]) p.onOpen(visible[0]) }} />
+        {filter && <button className="field-clear" onClick={() => setFilter('')} aria-label={t('Clear filter')}><Icon name="x" size={14} /></button>}
+      </label>
+      <button className={`btn lt-sort ${custom ? 'custom' : ''} ${viewMenu ? 'on' : ''}`} onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setViewMenu(viewMenu ? undefined : { left: r.right - 240, top: r.bottom + 6, anchor: { top: r.top, bottom: r.bottom } }) }}
+        title={t('Sort, group and filter')} aria-label={t('Sort, group and filter')} aria-haspopup="menu" aria-expanded={!!viewMenu}>
+        <Icon name="sort" size={14} /><span className="lt-sort-label">{t(SORTS.find(([v]) => v === sort)![1])}</span>{custom && <span className="lt-dot" aria-hidden="true" />}<Icon name="down" size={12} />
+      </button>
+    </>
+  )
   return (
     <div className={`slist ${p.embedded ? 'embedded' : ''}`}>
-      <div className="list-toolbar">
-        <div className="lt-scope">
-        {p.onAgent && (
-          <span className="seg sm" role="radiogroup" aria-label={t('Agents')}>
-            <button role="radio" aria-checked={!agent} className={!agent ? 'on' : ''} onClick={() => p.onAgent!('')}>{t('All agents')}</button>
-            {agentsWith.map((a) => <button key={a.id} role="radio" aria-checked={agent === a.id} className={agent === a.id ? 'on' : ''} onClick={() => p.onAgent!(a.id)}><AgentIcon agent={a.id} size={12} />{a.label}</button>)}
-          </span>
-        )}
-        {p.onProject && <ProjectScope sessions={own} value={scope} onChange={p.onProject} />}
-        </div>
-        <div className="lt-tools">
-        <label className="field lt-search">
-          {searching ? <span className="spinner" /> : <Icon name="search" size={14} />}
-          <input ref={filterRef} value={filter} onChange={(e) => setFilter(e.target.value)} placeholder={t('Search titles and messages')} aria-label={t('Search titles and messages')} spellCheck={false}
-            onKeyDown={(e) => { if (e.key === 'Escape') { setFilter(''); e.currentTarget.blur() } else if (e.key === 'Enter' && visible[0]) p.onOpen(visible[0]) }} />
-          {filter && <button className="field-clear" onClick={() => setFilter('')} aria-label={t('Clear filter')}><Icon name="x" size={14} /></button>}
-        </label>
-        <button className={`btn lt-sort ${custom ? 'custom' : ''} ${viewMenu ? 'on' : ''}`} onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setViewMenu(viewMenu ? undefined : { left: r.right - 240, top: r.bottom + 6, anchor: { top: r.top, bottom: r.bottom } }) }}
-          title={t('Sort, group and filter')} aria-label={t('Sort, group and filter')} aria-haspopup="menu" aria-expanded={!!viewMenu}>
-          <Icon name="sort" size={14} /><span className="lt-sort-label">{t(SORTS.find(([v]) => v === sort)![1])}</span>{custom && <span className="lt-dot" aria-hidden="true" />}<Icon name="down" size={12} />
-        </button>
-        </div>
-      </div>
+      {/* what to show: the agent and the project, as the first line of the content */}
+      {slot ? (p.onAgent || p.onProject) && <div className="sx-filters">{scopeControls}</div>
+        : <div className="list-toolbar"><div className="lt-scope">{scopeControls}</div><div className="lt-tools">{tools}</div></div>}
+      {slot && <ToolbarTools>{tools}</ToolbarTools>}
 
       {!p.loaded ? <div className="list-loading" aria-busy="true">{[0, 1, 2, 3, 4].map((i) => <div key={i} className="sk-row"><span className="sk-lines"><span style={{ width: `${70 - i * 7}%` }} /><span style={{ width: `${45 + i * 5}%` }} /></span></div>)}</div>
       : !sessions.length ? (p.empty ?? <div className="empty-state"><span className="tile"><Icon name="message" size={28} stroke={1.5} /></span>{t('No sessions here yet.')}</div>)
       : (
-        <div className="group-card slist-card">
+        <div className="sx">
+          {live.length > 0 && (
+            <section className="sx-section">
+              <h3 className="sx-head"><span className="live-dot" /><span className="sx-head-title">{t('Active now')}</span><span className="sx-head-count">{live.length}</span></h3>
+              <div className="sx-live-grid">{live.map(liveCard)}</div>
+            </section>
+          )}
           {groups.map((g) => {
             const open = isOpen(g)
             return (
-              <section key={g.key} className="sgroup">
+              <section key={g.key} className="sx-section">
                 {g.title && (
-                  <button className="sgroup-head" onClick={() => setToggled({ ...toggled, [g.key]: !open })} aria-expanded={open}>
-                    {g.pinned && <Icon name="pin" size={12} />}
-                    <span className="group-title">{g.title}</span>
-                    <span className="group-count">{g.items.length}</span>
+                  <button className="sx-head" onClick={() => setToggled({ ...toggled, [g.key]: !open })} aria-expanded={open}>
+                    {g.pinned && <Icon name="pin" size={13} />}
+                    <span className="sx-head-title">{g.title}</span>
+                    <span className="sx-head-count">{g.items.length}</span>
                     <span className={`chev ${open ? 'open' : ''}`}><Icon name="chev" size={12} /></span>
                   </button>
                 )}
-                {open && g.items.map(row)}
+                {open && <div className="sx-surface">{g.items.map(row)}</div>}
               </section>
             )
           })}
           {contentHits.length > 0 && (
-            <section className="sgroup">
-              <div className="sgroup-head static"><span className="group-title">{t('In messages')}</span><span className="group-count" style={{ opacity: 1 }}>{contentHits.length}</span></div>
+            <section className="sx-section">
+              <h3 className="sx-head"><Icon name="find" size={13} /><span className="sx-head-title">{t('In messages')}</span><span className="sx-head-count">{contentHits.length}</span></h3>
+              <div className="sx-surface">
               {contentHits.map((h) => {
                 const s = sessions.find((x) => x.id === h.sessionId)!
                 return (
-                  <button key={h.sessionId} className="srow hit" onClick={() => p.onOpen(s, { q: filter.trim(), m: h.snippets[0]?.msgIndex ?? 0 })}
+                  <button key={h.sessionId} className="sx-entry hit" onClick={() => p.onOpen(s, { q: filter.trim(), m: h.snippets[0]?.msgIndex ?? 0 })}
                     onContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, s }) }}>
-                    <AgentIcon agent={h.session.agent} size={16} />
-                    <span className="srow-main">
-                      <span className="srow-title"><span className="srow-text">{cleanTitle(h.session.title)}</span></span>
-                      {h.snippets[0] && <span className="srow-sub">{h.snippets[0].role === 'user' ? `${t('You')}: ` : ''}<Snippet s={h.snippets[0]} /></span>}
+                    <span className={`sx-tile at-${h.session.agent}`}><AgentIcon agent={h.session.agent} size={17} /></span>
+                    <span className="sx-body">
+                      <span className="sx-top"><span className="sx-title">{cleanTitle(h.session.title)}</span><span className="sx-time">{t(h.hits === 1 ? '{n} match' : '{n} matches', { n: h.hits })}</span></span>
+                      {h.snippets[0] && <span className="sx-preview">{h.snippets[0].role === 'user' ? `${t('You')}: ` : ''}<Snippet s={h.snippets[0]} /></span>}
                     </span>
-                    <span className="srow-time">{t(h.hits === 1 ? '{n} match' : '{n} matches', { n: h.hits })}</span>
                   </button>
                 )
               })}
+              </div>
             </section>
           )}
           {!groups.length && !contentHits.length && (

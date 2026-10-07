@@ -860,6 +860,15 @@ const ROWS: [string, string, string, string][] = [
   ['upstream error', '上游错误', '上游錯誤', '上流のエラー'],
   ['request refused', '请求被拒绝', '請求被拒絕', 'リクエストが拒否された'],
   ['cancelled', '已取消', '已取消', 'キャンセル'],
+
+  // ---- workspace ----
+  ['Recent work', '最近的工作', '最近的工作', '最近の作業'],
+  ['Elsewhere', '其他位置', '其他位置', 'その他の場所'],
+  ['Latest session', '最新会话', '最新工作階段', '最新のセッション'],
+  ['Open the latest session', '打开最新会话', '開啟最新工作階段', '最新のセッションを開く'],
+  ['Activity in the last 21 days', '最近 21 天的活动', '最近 21 天的活動', '過去 21 日間のアクティビティ'],
+  ['{n} session', '{n} 个会话', '{n} 個工作階段', '{n} 件のセッション'],
+  ['{n} message', '{n} 条消息', '{n} 則訊息', '{n} 件のメッセージ'],
 ]
 
 const COLS = ['zh-Hans', 'zh-Hant', 'ja'] as const

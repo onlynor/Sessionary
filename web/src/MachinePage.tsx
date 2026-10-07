@@ -11,7 +11,7 @@ import { TargetMark, describeTarget, useControl } from './control'
 import { ProjectsTab, SessionsTab, TrashTab, useTrashCount, projectsOf, type MachineRoute } from './MachineTabs'
 import { go, href, type MachineTab } from './route'
 import { TerminalTab } from './TerminalTab'
-import { Bar, Gauge, MachineIcon, MoreMenu, OfflinePanel, PageHead, StateBadge, Tabs, fmtBytes, fmtUptime, machineTarget, useUi } from './ui'
+import { Bar, Gauge, MachineIcon, MoreMenu, OfflinePanel, PageHead, StateBadge, Tabs, ToolbarSlot, fmtBytes, fmtUptime, machineTarget, useUi } from './ui'
 
 /** The agents this machine has: what is installed, how much history each holds, and a way into each. */
 function AgentsTab() {
@@ -119,6 +119,8 @@ export function MachinePage({ route }: { route: MachineRoute }) {
   const { system } = useSystem(machine, full ? 8000 : 0)
   const trashN = useTrashCount(sessions.length)
   const [busy, setBusy] = useState(false)
+  // the trailing end of the floating bar, where the open list puts its search and sort
+  const [slot, setSlot] = useState<HTMLElement | null>(null)
   const projectsN = projectsOf(sessions).length
 
   const connect = async () => {
@@ -180,8 +182,16 @@ export function MachinePage({ route }: { route: MachineRoute }) {
           </div>
         )}
 
-        <Tabs tabs={tabs} current={tab} />
+        {/* one floating bar: where you are in the machine on the leading side, the open list's tools on the trailing
+            side; it stays above the content, which scrolls under its edge */}
+        <div className="workbar">
+          <div className="workbar-glass">
+            <Tabs tabs={tabs} current={tab} />
+            <div className="workbar-tools" ref={setSlot} />
+          </div>
+        </div>
 
+        <ToolbarSlot.Provider value={slot}>
         {!ok ? <OfflinePanel machine={machine} busy={busy} onConnect={connect} />
           : tab === 'agents' ? <AgentsTab />
           : tab === 'projects' ? <ProjectsTab />
@@ -189,6 +199,7 @@ export function MachinePage({ route }: { route: MachineRoute }) {
           : tab === 'terminal' ? <TerminalTab params={route.params} />
           : tab === 'monitor' ? <MonitorTab />
           : <TrashTab />}
+        </ToolbarSlot.Provider>
       </div>
     </div>
   )

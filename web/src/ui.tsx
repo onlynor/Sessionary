@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { t, useT } from './i18n'
 import { ContextMenu, type MenuItem } from './ContextMenu'
 import type { ConfirmSpec } from './Confirm'
@@ -183,3 +184,27 @@ export function useAutoFocus<T extends HTMLElement>() {
 }
 
 export const open = (h: string) => (e?: React.MouseEvent) => { e?.preventDefault(); go(h) }
+
+// ---------- the workspace's unified toolbar ----------
+/**
+ * A page that has a floating toolbar (a machine's tabs) offers its trailing end here; a list puts its search and
+ * sort there instead of drawing a bar of its own. Without one (a list inside another page) the tools stay inline.
+ */
+export const ToolbarSlot = createContext<HTMLElement | null>(null)
+export function ToolbarTools({ children }: { children: React.ReactNode }) {
+  const slot = useContext(ToolbarSlot)
+  return slot ? createPortal(children, slot) : <div className="lt-tools">{children}</div>
+}
+
+// ---------- identity ----------
+const hueOf = (s: string) => [...s].reduce((h, c) => (h * 33 + c.charCodeAt(0)) % 360, 11)
+
+/** A project's mark: its initials on a colour of its own, the same every time (no project ships an icon). */
+export function ProjectMark({ name, id, size = 40 }: { name: string; id: string; size?: number }) {
+  const words = name.replace(/[^\p{L}\p{N}]+/gu, ' ').trim().split(/\s+/).filter(Boolean)
+  const mono = (words.length > 1 ? words[0]![0]! + words[1]![0]! : (words[0] ?? '?').slice(0, 2)).toUpperCase()
+  return <span className="pj-mark" aria-hidden="true" style={{ width: size, height: size, fontSize: Math.round(size * (mono.length > 1 ? 0.36 : 0.44)), '--h': hueOf(id) } as React.CSSProperties}>{mono}</span>
+}
+
+/** a path as people read it: their home folder as ~ */
+export const shortPath = (p?: string) => (p ?? '').replace(/^\/(?:home|Users)\/[^/]+(?=\/|$)/, '~').replace(/^[A-Za-z]:\\Users\\[^\\]+/, '~')
