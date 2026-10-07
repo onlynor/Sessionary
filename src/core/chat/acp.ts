@@ -1,4 +1,4 @@
-import { RpcPeer } from './lines.ts'
+import { RpcPeer, exitReason } from './lines.ts'
 import { ChatError, type ApprovalOption, type ChatDriver, type ChatSend, type Emit, type ModeOption, type Proc, type SlashCommand, type Spawner } from './types.ts'
 
 /** the text of an ACP content block, or what stands in for it */
@@ -45,6 +45,8 @@ export class AcpDriver implements ChatDriver {
   private commands: SlashCommand[] = []
   private loadedHistory = false
   private ended = false
+  /** closed from here: its end is no news */
+  private closing = false
   onEnd?: (error?: string) => void
 
   constructor(private o: { agent: string; spawn: Spawner; bin: string; args: string[]; cwd?: string; resume?: string; model?: string; mode?: string; env?: Record<string, string> }, private emit: Emit) {}
@@ -52,7 +54,7 @@ export class AcpDriver implements ChatDriver {
   async start() {
     this.proc = this.o.spawn({ bin: this.o.bin, args: this.o.args, cwd: this.o.cwd, env: { NO_COLOR: '1', ...this.o.env } })
     this.proc.on('error', (e: NodeJS.ErrnoException) => this.end(e.code === 'ENOENT' ? `The ${this.o.bin} command was not found.` : e.message))
-    this.proc.on('close', (code) => this.end(code ? this.rpc.reader.stderr.trim().split('\n').slice(-3).join('\n') || `The agent exited with code ${code}.` : undefined))
+    this.proc.on('close', (code, signal) => this.end(exitReason(code, signal, this.rpc.reader.stderr, this.closing)))
     this.rpc = new RpcPeer(this.proc, { notification: (m, p) => this.onNotification(m, p), request: (m, p, reply, fail) => this.onRequest(m, p, reply, fail) })
     const fail = (e: Error) => new ChatError(`${this.o.agent} did not start: ${this.rpc.reader.stderr.trim().split('\n').slice(-2).join(' ') || e.message}`, 'unavailable')
     const init = await this.rpc.request('initialize', {
@@ -162,6 +164,7 @@ export class AcpDriver implements ChatDriver {
   async answer(): Promise<void> { throw new ChatError('This agent does not ask questions this way.', 'unsupported') }
   async close() {
     if (this.ended) return
+    this.closing = true
     try { await Promise.race([this.rpc.request('session/close', { sessionId: this.sessionId }, 2000), new Promise((r) => setTimeout(r, 2000))]) } catch { /* not every agent has it */ }
     try { this.proc.stdin.end() } catch { /* ignore */ }
     const p = this.proc

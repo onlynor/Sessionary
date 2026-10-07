@@ -1,4 +1,4 @@
-import { RpcPeer } from './lines.ts'
+import { RpcPeer, exitReason } from './lines.ts'
 import { ChatError, type ApprovalOption, type ChatDriver, type ChatSend, type Emit, type ModeOption, type Proc, type Question, type Spawner } from './types.ts'
 
 /**
@@ -48,6 +48,8 @@ export class CodexDriver implements ChatDriver {
   private items = new Map<string, any>()
   private pending = new Map<string, { reply: (r: unknown) => void; kind: 'command' | 'file' | 'perm' | 'input' | 'elicit'; params: any; decisions?: Record<string, unknown> }>()
   private ended = false
+  /** closed from here: its end is no news */
+  private closing = false
   onEnd?: (error?: string) => void
 
   constructor(private o: { spawn: Spawner; bin?: string; cwd?: string; resume?: string; model?: string; mode?: string; effort?: string; provider?: string }, private emit: Emit) {
@@ -59,7 +61,7 @@ export class CodexDriver implements ChatDriver {
   async start() {
     this.proc = this.o.spawn({ bin: this.o.bin ?? 'codex', args: ['app-server'], cwd: this.o.cwd, env: { NO_COLOR: '1' } })
     this.proc.on('error', (e: NodeJS.ErrnoException) => this.end(e.code === 'ENOENT' ? 'The codex command was not found.' : e.message))
-    this.proc.on('close', (code) => this.end(code ? this.rpc.reader.stderr.trim().split('\n').slice(-3).join('\n') || `The agent exited with code ${code}.` : undefined))
+    this.proc.on('close', (code, signal) => this.end(exitReason(code, signal, this.rpc.reader.stderr, this.closing)))
     this.rpc = new RpcPeer(this.proc, { notification: (m, p) => this.onNotification(m, p), request: (m, p, reply, fail, id) => this.onRequest(m, p, reply, fail, id) })
     const fail = (e: Error) => new ChatError(`Codex did not start: ${this.rpc.reader.stderr.trim().split('\n').slice(-2).join(' ') || e.message}`, 'unavailable')
     const init = await this.rpc.request('initialize', { clientInfo: { name: 'sessionary', title: 'Sessionary', version: '0.1.0' }, capabilities: { experimentalApi: true } }, 30_000).catch((e) => { throw fail(e) })
@@ -121,6 +123,7 @@ export class CodexDriver implements ChatDriver {
   }
   async close() {
     if (this.ended) return
+    this.closing = true
     try { this.proc.stdin.end() } catch { /* ignore */ }
     const p = this.proc
     setTimeout(() => p.kill('SIGTERM'), 1500).unref?.()

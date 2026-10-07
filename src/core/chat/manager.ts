@@ -198,7 +198,7 @@ export class Chats {
     ;(driver as { onEnd?: (e?: string) => void }).onEnd = (error) => {
       if (!started) return // a failed start is reported once, below
       chat.error = error ?? chat.error
-      if (error) this.record(chat, { t: 'note', level: 'error', text: error })
+      if (error) this.noteOnce(chat, error)
       this.setState(chat, 'closed')
       this.o.hooks?.changed?.(this.summary(chat), 'closed')
     }
@@ -217,11 +217,16 @@ export class Chats {
 
   private failed(chat: Chat, why: string): false {
     chat.error = why
-    this.record(chat, { t: 'note', level: 'error', text: why })
+    this.noteOnce(chat, why)
     this.setState(chat, 'closed')
     this.o.hooks?.changed?.(this.summary(chat), 'closed')
     setTimeout(() => this.chats.delete(chat.id), 60_000).unref?.()
     return false
+  }
+
+  /** an error, said once: a driver reports its own end, and the manager says why only if it has not */
+  private noteOnce(chat: Chat, text: string) {
+    if (!chat.log.some((e) => e.t === 'note' && (e as { text: string }).text === text)) this.record(chat, { t: 'note', level: 'error', text })
   }
 
   private makeDriver(req: OpenRequest, bin: string, emit: (e: ChatEvent) => void, spawner: Spawner, routed?: { provider: string; model: string }): ChatDriver {

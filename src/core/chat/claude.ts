@@ -1,4 +1,4 @@
-import { LineReader, textDiff } from './lines.ts'
+import { LineReader, textDiff, exitReason } from './lines.ts'
 import { ChatError, type ChatDriver, type ChatSend, type Emit, type ModeOption, type Proc, type Question, type SpawnSpec, type Spawner } from './types.ts'
 
 const MODES: ModeOption[] = [
@@ -39,6 +39,8 @@ export class ClaudeDriver implements ChatDriver {
   private tools = new Map<string, { name: string; input?: unknown }>()
   private approvals = new Map<string, { request: any }>()
   private ended = false
+  /** closed from here: its end is no news */
+  private closing = false
   private resolved = new Map<string, string>()
 
   constructor(private o: { spawn: Spawner; bin?: string; cwd?: string; resume?: string; model?: string; mode?: string; extraArgs?: string[]; wrap?: (s: SpawnSpec) => SpawnSpec }, private emit: Emit) {}
@@ -51,7 +53,7 @@ export class ClaudeDriver implements ChatDriver {
     args.push(...(this.o.extraArgs ?? []))
     this.proc = this.o.spawn({ bin: this.o.bin ?? 'claude', args, cwd: this.o.cwd, env: { NO_COLOR: '1' } })
     this.proc.on('error', (e: NodeJS.ErrnoException) => this.end(e.code === 'ENOENT' ? 'The claude command was not found.' : e.message))
-    this.proc.on('close', (code) => this.end(code ? this.reader.stderr.trim().split('\n').slice(-3).join('\n') || `The agent exited with code ${code}.` : undefined))
+    this.proc.on('close', (code, signal) => this.end(exitReason(code, signal, this.reader.stderr, this.closing)))
     this.reader = new LineReader(this.proc, (o) => this.onMessage(o), () => {})
     const init = await this.control({ subtype: 'initialize' }, 30_000).catch((e) => { throw new ChatError(`Claude Code did not start: ${this.reader.stderr.trim().split('\n').slice(-2).join(' ') || e.message}`, 'unavailable') })
     for (const m of init.models ?? []) if (m.resolvedModel) this.resolved.set(m.resolvedModel, m.value)
@@ -106,6 +108,7 @@ export class ClaudeDriver implements ChatDriver {
   async setEffort(): Promise<void> { throw new ChatError('This agent cannot change its effort during a chat.', 'unsupported') }
   async close() {
     if (this.ended) return
+    this.closing = true
     try { this.proc.stdin.end() } catch { /* ignore */ }
     const p = this.proc
     setTimeout(() => p.kill('SIGTERM'), 1500).unref?.()

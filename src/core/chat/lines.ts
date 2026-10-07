@@ -94,3 +94,14 @@ export function textDiff(path: string, oldText: string, newText: string): string
   const ctx = (l: string[]) => l.map((v) => ' ' + v)
   return [`@@ ${path}`, ...ctx(a.slice(Math.max(0, s - 3), s)), ...ops, ...ctx(a.slice(ea, ea + 3))].join('\n')
 }
+
+/**
+ * Why an agent's process ended, for the page: how it ended and the last thing it said. Nothing when it finished
+ * normally or was closed from here (`closing`). Over ssh a signal on the node arrives as 128 + its number.
+ */
+export function exitReason(code: number | null, signal: NodeJS.Signals | null | undefined, stderr: string, closing: boolean): string | undefined {
+  if (closing || (code === 0 && !signal)) return undefined
+  const said = stderr.trim().split('\n').slice(-3).join('\n')
+  const how = signal ? `was stopped (${signal})` : code != null && code > 128 && code < 160 ? `was stopped (signal ${code - 128})` : `exited with code ${code}`
+  return said ? `The agent ${how}:\n${said}` : `The agent ${how}.`
+}

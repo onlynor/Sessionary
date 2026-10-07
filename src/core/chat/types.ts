@@ -96,7 +96,7 @@ export interface Proc {
   stderr: NodeJS.ReadableStream
   pid?: number
   kill(sig?: NodeJS.Signals): boolean
-  on(ev: 'close', f: (code: number | null) => void): unknown
+  on(ev: 'close', f: (code: number | null, signal?: NodeJS.Signals | null) => void): unknown
   on(ev: 'error', f: (e: Error) => void): unknown
 }
 /** `tunnel`: on a node, a port there leading back here (ignored on this computer) */

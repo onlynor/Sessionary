@@ -312,12 +312,24 @@ export class Mirror {
 export const posix = (s: string) => (/^[\w@%+=:,./-]+$/.test(s) ? s : `'${s.replace(/'/g, `'\\''`)}'`)
 
 /**
+ * How a program is started on a node — a chat's agent, a terminal's agent, a resume command: by the person's login
+ * shell so the node's PATH (npm, ~/.local/bin) applies, in `cwd`, with `env` and the session's secret (see
+ * `secretPrelude`). What the shell itself prints while it starts (a broken line in .bashrc, "no job control") is
+ * dropped and the program's own stderr kept, so an error the page shows is the program's.
+ */
+export function loginExec(o: { bin: string; args: string[]; cwd?: string; env?: Record<string, string>; secret?: { name: string } }): string {
+  const env = Object.entries(o.env ?? {}).map(([k, v]) => posix(`${k}=${v}`))
+  const run = `exec ${env.length ? `env ${env.join(' ')} ` : ''}${[o.bin, ...o.args].map(posix).join(' ')}`
+  const inner = `exec 2>&3 3>&-; ${o.secret ? secretPrelude(o.secret.name) : ''}${o.cwd ? `cd ${posix(o.cwd)} && ` : ''}${run}`
+  return `exec "\${SHELL:-/bin/sh}" -lic ${posix(inner)} 3>&2 2>/dev/null`
+}
+
+/**
  * The command that opens an interactive session on the node: ssh with a terminal, then the agent's own resume
  * command in the session's directory, run by a login shell so the node's PATH (npm / ~/.local/bin) applies.
  */
 export function sshTerminalCommand(t: SshTarget, cmd: { bin: string; args: string[]; cwd: string }): { bin: string; args: string[]; line: string } {
-  const remote = `${cmd.cwd ? `cd ${posix(cmd.cwd)} && ` : ''}${[cmd.bin, ...cmd.args].map(posix).join(' ')}`
-  const wrapped = `exec "\${SHELL:-/bin/sh}" -lic ${posix(remote)}`
+  const wrapped = loginExec(cmd)
   const args = ['-t', ...(t.port ? ['-p', String(t.port)] : []), ...(t.identity ? ['-i', t.identity] : []), '--', `${t.user ? `${t.user}@` : ''}${t.host}`, wrapped]
   return { bin: 'ssh', args, line: ['ssh', ...args].map(posix).join(' ') }
 }
@@ -332,15 +344,9 @@ const size = (z?: Partial<TermSize>) => ({ cols: Math.max(20, Math.min(500, Math
  */
 export function sshTerminalSpec(t: SshTarget, o: { cwd?: string; run?: { bin: string; args: string[] }; size?: Partial<TermSize>; env?: Record<string, string>; secret?: { name: string; value: string }; tunnel?: Tunnel }): { bin: string; args: string[]; env?: Record<string, string> } {
   const { cols, rows } = size(o.size)
-  const shell = '"${SHELL:-/bin/sh}"'
-  // what the program is started with goes through `env`, replacing the shell, so it is not left in a process's arguments
-  const env = Object.entries(o.env ?? {}).map(([k, v]) => `${k}=${v}`)
-  const inner = o.run
-    ? `${o.secret ? secretPrelude(o.secret.name) : ''}${o.cwd ? `cd ${posix(o.cwd)} && ` : ''}${env.length ? 'exec env ' + env.map(posix).join(' ') + ' ' : ''}${[o.run.bin, ...o.run.args].map(posix).join(' ')}`
-    : undefined
-  const start = inner ? `exec ${shell} -lic ${posix(inner)}` : `${o.cwd ? `cd ${posix(o.cwd)} 2>/dev/null; ` : ''}exec ${shell} -l`
+  const start = o.run ? loginExec({ ...o.run, cwd: o.cwd, env: o.env, secret: o.secret }) : `${o.cwd ? `cd ${posix(o.cwd)} 2>/dev/null; ` : ''}exec "\${SHELL:-/bin/sh}" -l`
   const remote = `stty cols ${cols} rows ${rows} 2>/dev/null; ${start}`
-  const secret = !!(o.secret && inner)
+  const secret = !!(o.secret && o.run)
   return {
     bin: process.env.SESSIONARY_SSH_BIN ?? 'ssh', args: sshArgs(t, [remote], { tunnel: o.tunnel, sendSecret: secret }).map((a) => (a === '-T' ? '-tt' : a)),
     ...(secret && { env: { [SECRET_VAR]: o.secret!.value } }),

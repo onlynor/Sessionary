@@ -134,7 +134,7 @@ test('an ssh node is mirrored over ssh and read in place, with nothing installed
       assert.equal((await req(`/api/nodes/${node.id}/proxy/api/sessions/claude-code:c1/${p}`)).status, 404, p)
     // resuming is the agent's own command, run on the node through ssh in a terminal
     const resume = await json(`/api/nodes/${node.id}/resume-command?session=${encodeURIComponent('claude-code:c1')}`)
-    assert.match(resume.line, /^ssh -t -- root@vps\.example\.com 'exec "\$\{SHELL:-\/bin\/sh\}" -lic .*cd \/srv\/app && claude --resume c1/)
+    assert.match(resume.line, /^ssh -t -- root@vps\.example\.com 'exec "\$\{SHELL:-\/bin\/sh\}" -lic .*cd \/srv\/app && exec claude --resume c1/)
     // the local list does not mix them in
     assert.deepEqual(await json('/api/sessions'), [])
 
@@ -220,4 +220,17 @@ Match host foo
     { alias: 'vps', hostName: '203.0.113.9', user: 'root', port: 2200, identity: '~/.ssh/id_vps' },
     { alias: 'us-vps', hostName: '203.0.113.9', user: 'root', port: 2200, identity: '~/.ssh/id_vps' },
   ])
+})
+
+test("a program on a node keeps its own stderr; what the login shell prints while it starts is dropped", async (t) => {
+  const { execFileSync, spawnSync } = await import('node:child_process')
+  try { execFileSync('bash', ['-c', 'true']) } catch { return t.skip('no bash here') }
+  const { loginExec } = await import('../src/core/sync.ts')
+  const home = fs.mkdtempSync(path.join(tmp, 'login-'))
+  fs.writeFileSync(path.join(home, '.bash_profile'), 'echo "bash: /root/.broken/completion.bash: No such file or directory" >&2\nexport FROM_PROFILE=yes\n')
+  const cmd = loginExec({ bin: 'sh', args: ['-c', 'echo "out $FROM_PROFILE $X"; echo "the agent failed" >&2; exit 3'], cwd: home, env: { X: 'a b' } })
+  const r = spawnSync('sh', ['-c', cmd], { env: { PATH: process.env.PATH, HOME: home, SHELL: 'bash' }, encoding: 'utf8' })
+  assert.equal(r.stdout, 'out yes a b\n') // the login shell's PATH and setup applied, the env passed through intact
+  assert.equal(r.stderr, 'the agent failed\n') // only the program's own words
+  assert.equal(r.status, 3)
 })

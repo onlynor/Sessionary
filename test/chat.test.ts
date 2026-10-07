@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
 import { Chats, localSpawner } from '../src/core/chat/manager.ts'
-import { textDiff } from '../src/core/chat/lines.ts'
+import { exitReason, textDiff } from '../src/core/chat/lines.ts'
 import type { StoredEvent } from '../src/core/chat/types.ts'
 
 /** a stand-in for `claude -p --input-format stream-json`: answers initialize, then a Write asks permission first */
@@ -269,3 +269,41 @@ test('a routed Codex chat names the routing when it opens the thread (a resumed 
   } finally { await chats.stopAll() }
 })
 
+test('an agent that dies mid-conversation ends its chat with the reason, and opening the session again starts one new agent', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'fake-crash-'))
+  const bin = join(dir, 'claude')
+  writeFileSync(bin, `#!/usr/bin/env node
+const rl = require('readline').createInterface({ input: process.stdin })
+const out = (o) => process.stdout.write(JSON.stringify(o) + '\\n')
+rl.on('line', (l) => {
+  const o = JSON.parse(l)
+  if (o.type === 'control_request') return out({ type: 'control_response', response: { subtype: 'success', request_id: o.request_id, response: {} } })
+  if (o.type === 'user') { process.stderr.write('segfault in the model client\\n'); process.exit(139) }
+})
+`)
+  chmodSync(bin, 0o755)
+  const chats = new Chats({ spawnFor: () => localSpawner, binFor: () => bin })
+  try {
+    const c = await chats.open({ agent: 'claude-code', machine: 'local', resume: 's1', sessionKey: 'claude-code:s1' })
+    const got = collect(chats, c.id)
+    await until(() => chats.get(c.id)?.state === 'idle')
+    await chats.send(c.id, { text: 'hi' }).catch(() => {})
+    await until(() => chats.get(c.id)?.state === 'closed')
+    const note = got.find((e) => e.t === 'note') as { text: string } | undefined
+    assert.match(note?.text ?? '', /segfault/)
+    assert.equal(chats.forSession('local', 'claude-code', 'claude-code:s1'), undefined, 'a dead chat is not handed out again')
+    const again = await chats.open({ agent: 'claude-code', machine: 'local', resume: 's1', sessionKey: 'claude-code:s1' })
+    const twice = await chats.open({ agent: 'claude-code', machine: 'local', resume: 's1', sessionKey: 'claude-code:s1' })
+    assert.notEqual(again.id, c.id)
+    assert.equal(twice.id, again.id)
+    await until(() => chats.get(again.id)?.state === 'idle')
+  } finally { await chats.stopAll() }
+})
+
+test('how an agent ended is said plainly, and an end asked for from here is no news', () => {
+  assert.equal(exitReason(0, null, 'bye', false), undefined)
+  assert.equal(exitReason(null, 'SIGTERM', '', true), undefined) // closed from here
+  assert.equal(exitReason(null, 'SIGKILL', '', false), 'The agent was stopped (SIGKILL).') // killed on this computer: no code at all
+  assert.equal(exitReason(137, null, '', false), 'The agent was stopped (signal 9).') // the same on a node, through ssh
+  assert.equal(exitReason(1, null, 'a\nb\nc\nd\n', false), 'The agent exited with code 1:\nb\nc\nd')
+})

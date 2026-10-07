@@ -1,4 +1,4 @@
-import { LineReader, textDiff } from './lines.ts'
+import { LineReader, textDiff, exitReason } from './lines.ts'
 import { ChatError, type ChatDriver, type ChatSend, type Emit, type Proc, type Spawner } from './types.ts'
 
 const text = (c: any): string => (typeof c === 'string' ? c : Array.isArray(c) ? c.map((b) => (b?.type === 'text' ? b.text : b?.type === 'image' ? '[image]' : '')).filter(Boolean).join('\n') : '')
@@ -20,6 +20,8 @@ export class PiDriver implements ChatDriver {
   private asked = new Map<string, any>()
   private turnOpen = false
   private ended = false
+  /** closed from here: its end is no news */
+  private closing = false
   onEnd?: (error?: string) => void
 
   constructor(private o: { spawn: Spawner; bin?: string; cwd?: string; resume?: string; model?: string; effort?: string }, private emit: Emit) {}
@@ -31,7 +33,7 @@ export class PiDriver implements ChatDriver {
     if (this.o.effort) args.push('--thinking', this.o.effort)
     this.proc = this.o.spawn({ bin: this.o.bin ?? 'pi', args, cwd: this.o.cwd, env: { NO_COLOR: '1' } })
     this.proc.on('error', (e: NodeJS.ErrnoException) => this.end(e.code === 'ENOENT' ? 'The pi command was not found.' : e.message))
-    this.proc.on('close', (code) => this.end(code ? this.reader.stderr.trim().split('\n').slice(-3).join('\n') || `The agent exited with code ${code}.` : undefined))
+    this.proc.on('close', (code, signal) => this.end(exitReason(code, signal, this.reader.stderr, this.closing)))
     this.reader = new LineReader(this.proc, (o) => this.onMessage(o), () => {})
     const fail = (e: Error) => new ChatError(`Pi did not start: ${this.reader.stderr.trim().split('\n').slice(-2).join(' ') || e.message}`, 'unavailable')
     const [st, models, levels, cmds] = await Promise.all([
@@ -90,6 +92,7 @@ export class PiDriver implements ChatDriver {
   async answer(): Promise<void> { throw new ChatError('Use respond for this request.', 'unsupported') }
   async close() {
     if (this.ended) return
+    this.closing = true
     try { this.proc.stdin.end() } catch { /* ignore */ }
     const p = this.proc
     setTimeout(() => p.kill('SIGTERM'), 2000).unref?.()
