@@ -237,6 +237,9 @@ rl.on('line', (l) => {
   fs.appendFileSync(${JSON.stringify(join(dir, 'calls'))}, JSON.stringify({ method: o.method, params: o.params }) + '\\n')
   if (o.method === 'initialize') return out({ id: o.id, result: { userAgent: 'codex/0.1.0' } })
   if (o.method === 'model/list') return out({ id: o.id, result: { data: [] } })
+  // like the real one: a thread whose stored provider no config defines cannot be resumed without naming another
+  if (o.method === 'thread/resume' && o.params.threadId === 'th-gone' && !o.params.modelProvider) return out({ id: o.id, error: { code: -32600, message: 'failed to load configuration: Model provider \`sessionary\` not found' } })
+  if (o.method === 'config/read') return out({ id: o.id, result: { config: { model_provider: 'own', model: 'own-model' } } })
   if (o.method === 'thread/resume' || o.method === 'thread/start') return out({ id: o.id, result: { thread: { id: o.params.threadId ?? 'th-new' }, model: o.params.model ?? 'its-own' } })
   out({ id: o.id, result: {} })
 })
@@ -266,6 +269,19 @@ test('a routed Codex chat names the routing when it opens the thread (a resumed 
     assert.equal(r2.params.modelProvider, undefined)
     assert.equal(r2.params.model, undefined)
     await free.stopAll()
+  } finally { await chats.stopAll() }
+})
+
+test('a Codex thread started on a provider that is gone carries on with Codex’s own provider', async () => {
+  const codex = fakeCodex()
+  const chats = new Chats({ spawnFor: () => localSpawner, binFor: () => codex.bin })
+  try {
+    const c = await chats.open({ agent: 'codex', machine: 'local', resume: 'th-gone', sessionKey: 'codex:th-gone' })
+    await until(() => chats.get(c.id)?.state === 'idle')
+    const tries = codex.calls().filter((x: any) => x.method === 'thread/resume')
+    assert.equal(tries.length, 2)
+    assert.equal(tries[1].params.modelProvider, 'own')
+    assert.equal(chats.get(c.id)?.info.model, 'own-model')
   } finally { await chats.stopAll() }
 })
 

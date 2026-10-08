@@ -70,8 +70,16 @@ export class CodexDriver implements ChatDriver {
     const m = MODES.find((x) => x.id === this.mode)!
     // a routed chat names its provider: a resumed thread otherwise stays on the one it was started with
     const base = { cwd: this.o.cwd, approvalPolicy: m.policy, sandbox: m.sandbox, ...(this.model && { model: this.model }), ...(this.o.provider && { modelProvider: this.o.provider }) }
+    const resume = (extra = {}) => this.rpc.request('thread/resume', { threadId: this.o.resume, excludeTurns: true, ...base, ...extra }, 60_000)
     const th = this.o.resume
-      ? await this.rpc.request('thread/resume', { threadId: this.o.resume, excludeTurns: true, ...base }, 60_000).catch((e) => { throw new ChatError(e.message, 'failed') })
+      ? await resume().catch(async (e) => {
+        // a thread started on a provider that is no longer defined (one Sessionary routed, the binding since removed)
+        // carries on with Codex's own provider and model
+        if (this.o.provider || !/Model provider `[^`]*` not found/.test(e.message)) throw e
+        const c = (await this.rpc.request('config/read', {}, 30_000).catch(() => undefined))?.config
+        if (!c?.model_provider) throw e
+        return resume({ modelProvider: c.model_provider, ...(!this.model && c.model && { model: c.model }) })
+      }).catch((e) => { throw new ChatError(e.message, 'failed') })
       : await this.rpc.request('thread/start', base, 60_000).catch((e) => { throw new ChatError(e.message, 'failed') })
     this.sessionId = th.thread?.id ?? this.o.resume
     this.model = th.model ?? this.model
