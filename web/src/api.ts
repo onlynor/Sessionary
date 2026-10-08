@@ -1,4 +1,4 @@
-import type { CtlGroup, CtlProvider, CtlState, Protocol, UsageDayRow, ChatSummary, Agent, AgentInstall, Changes, EditBlock, FileDiff, Machine, NodeInfo, NodeInput, OpenTarget, ProjectContext, Run, SearchHit, Session, SessionSummary, Snip, SshHost, Status, Summary, SystemInfo, TermInfo, TreeEntry, Trash } from './types'
+import type { CtlAgent, CtlGroup, CtlRoute, CtlProvider, CtlState, Protocol, UsageDayRow, ChatSummary, Agent, AgentInstall, Changes, EditBlock, FileDiff, Machine, NodeInfo, NodeInput, OpenTarget, ProjectContext, Run, SearchHit, Session, SessionSummary, Snip, SshHost, Status, Summary, SystemInfo, TermInfo, TreeEntry, Trash } from './types'
 
 async function get<T>(url: string, init?: RequestInit): Promise<T> {
   const r = await fetch(url, init)
@@ -78,6 +78,8 @@ export const api = makeApi('')
 
 /** Things that are about machines themselves, not about one machine's sessions. */
 export const host = {
+  /** every machine's session-history usage, added up here; `missing` = nodes not online, left out */
+  usageMachines: (since: string) => get<{ rows: UsageDayRow[]; missing: string[] }>(`/api/usage/machines?since=${encodeURIComponent(since)}`),
   machines: () => get<Machine[]>('/api/machines'),
   system: (id: string) => get<SystemInfo>(`/api/machines/${enc(id)}/system`),
   /** what is installed there; `refresh` makes it look again instead of answering from memory */
@@ -134,7 +136,10 @@ export const controlApi = {
   addGroup: (g: { name: string; mode?: string; members?: string[] }) => post<CtlGroup>('/api/control/groups', g),
   updateGroup: (id: string, g: Partial<Pick<CtlGroup, 'name' | 'mode' | 'members' | 'on'>>) => send<CtlGroup>('PUT', `/api/control/groups/${enc(id)}`, g),
   removeGroup: (id: string) => send('DELETE', `/api/control/groups/${enc(id)}`),
-  bind: (agent: string, target: string) => post('/api/control/bindings', { agent, target }),
+  /** sets (or with '' clears) the route of a scope: `machine` '' is every machine */
+  route: (scope: { machine: string; agent?: string; project?: string; session?: string }, target: string) => post<{ routes: CtlRoute[]; agents: CtlAgent[] }>('/api/control/routes', { ...scope, target }),
+  /** the routable agents on one machine, with the route each starts on and where it came from */
+  agents: (machine: string) => get<CtlAgent[]>(`/api/control/agents?machine=${encodeURIComponent(machine)}`),
   wake: (member: string) => post('/api/control/members/wake', { member }),
   gatewayKey: () => post<{ key: string }>('/api/control/gateway/key'),
   rotateKey: () => post<{ key: string }>('/api/control/gateway/rotate'),

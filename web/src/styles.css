@@ -1350,6 +1350,8 @@ a { color: inherit; text-decoration: none; }
 .mode.open { background: var(--press); color: var(--text); }
 .pick-menu { position: absolute; left: 0; bottom: calc(100% + 8px); min-width: 220px; max-width: 320px; max-height: min(52vh, 420px); overflow-y: auto; padding: 5px; z-index: 40; border-radius: 12px; background: var(--bg-pop); backdrop-filter: blur(24px) saturate(1.6); box-shadow: var(--shadow-pop); }
 .pick-menu.wide { min-width: 300px; max-width: 420px; }
+.pick-menu .menu-search { position: sticky; top: 0; z-index: 1; }
+.pick-none { padding: var(--s2) var(--s3); }
 .pick-title { padding: 6px var(--s2) 4px; font-size: var(--fs-1); font-weight: 600; color: var(--text-3); text-transform: none; }
 .pick-item { display: flex; align-items: flex-start; gap: var(--s1); width: 100%; padding: 5px var(--s2); border-radius: 6px; text-align: left; font-size: var(--fs-2); }
 .pick-item:hover { background: var(--accent); color: var(--on-accent); }
@@ -1510,6 +1512,10 @@ a { color: inherit; text-decoration: none; }
 .bind-note a { color: var(--accent); }
 .bind-pick { width: min(320px, 42%); flex: none; }
 .bind-snip { padding: 0 var(--s3) var(--s3) calc(36px + var(--s3) * 2); }
+/* Routing: which machine's routes are shown (every machine first, then this computer and the nodes) */
+.route-scope { margin: 0 0 var(--s3); max-width: 100%; overflow-x: auto; }
+.bind-row .app-tile.scope-tile { background: var(--fill); box-shadow: none; color: var(--text-2); }
+.bind-pick.row-gap { display: flex; align-items: center; justify-content: flex-end; gap: var(--s2); min-width: 0; color: var(--text-2); font-size: var(--fs-1); }
 .bind-snip .quiet-note { margin: 0 0 var(--s2); }
 .btn.sm.on { background: var(--accent-fill); color: var(--accent); }
 
@@ -1565,6 +1571,7 @@ a { color: inherit; text-decoration: none; }
 .usage-title { display: flex; align-items: center; justify-content: space-between; gap: var(--s2) var(--s4); flex-wrap: wrap; margin-bottom: 2px; }
 .usage-title h1 { margin: 0; }
 .usage-lede { margin: 0 0 var(--s5); color: var(--text-2); font-size: var(--fs-2); }
+.usage-missing { color: var(--text-3); }
 .uh-card { position: relative; padding: var(--s5) var(--s5) var(--s4); border-radius: var(--r4); background: var(--bg-card); box-shadow: var(--shadow-card); }
 .uh-loading { height: 340px; }
 .uh-head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--s4); margin-bottom: var(--s5); flex-wrap: wrap; }

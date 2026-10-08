@@ -16,9 +16,10 @@ function Pick({ label, value, options, onPick, icon, disabled, wide }: {
   useT()
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [q, setQ] = useState('')
   const ref = useRef<HTMLDivElement>(null)
   useEffect(() => {
-    if (!open) return
+    if (!open) { setQ(''); return }
     const off = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) setOpen(false) }
     const key = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); setOpen(false) } }
     addEventListener('mousedown', off); addEventListener('keydown', key, true)
@@ -26,6 +27,10 @@ function Pick({ label, value, options, onPick, icon, disabled, wide }: {
   }, [open])
   const current = options.find((o) => o.id === value)
   const text = current?.label ?? value
+  // an agent may offer hundreds of models (Hermes lists every provider it can reach): a long list can be searched
+  const searchable = options.length > 12
+  const needle = q.trim().toLowerCase()
+  const shown = (needle ? options.filter((o) => `${o.label} ${o.id}`.toLowerCase().includes(needle)) : options).slice(0, 200)
   if (!options.length && !value) return null
   return (
     <div className="pick" ref={ref}>
@@ -35,7 +40,9 @@ function Pick({ label, value, options, onPick, icon, disabled, wide }: {
       {open && (
         <div className={`pick-menu pop-in ${wide ? 'wide' : ''}`} role="listbox" aria-label={label}>
           <div className="pick-title">{label}</div>
-          {options.map((o) => (
+          {searchable && <div className="menu-search"><Icon name="search" size={13} /><input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('Filter models')} aria-label={t('Filter models')} spellCheck={false} /></div>}
+          {searchable && !shown.length && <div className="pick-desc pick-none">{t('No model matches.')}</div>}
+          {shown.map((o) => (
             <button key={o.id} role="option" aria-selected={o.id === value} className={`pick-item ${o.id === value ? 'on' : ''}`}
               onClick={async () => { setOpen(false); if (o.id === value) return; setBusy(true); try { await onPick(o.id) } finally { setBusy(false) } }}>
               <span className="pick-check">{o.id === value && <Icon name="check" size={14} stroke={1.75} />}</span>
@@ -145,7 +152,7 @@ export function ChatComposer({ agentName, view, opening, error, placeholder, dis
     : working ? `${t('{agent} is working', { agent: agentName })}${view.since ? ` · ${elapsed(Date.now() - view.since)}` : ''}`
     : ''
 
-  const models = (info.models ?? []).slice(0, 200)
+  const models = info.models ?? []
   const modes = info.modes ?? []
   const efforts = (info.efforts ?? []).map((e) => ({ id: e, label: e }))
   return (

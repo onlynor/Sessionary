@@ -54,7 +54,9 @@ export function ModelsPage({ provider: chosen, add }: { provider?: string; add: 
             <div className="ctl-split">
               <div className="plist group-card" role="list">
                 {providers.map((p) => {
-                  const users = (state.agents ?? []).filter((a) => a.target && (a.target.startsWith(p.id + '/') || (a.target.startsWith('group/') && state.groups.find((g) => `group/${g.id}` === a.target)?.members.some((m) => m.startsWith(p.id + '/')))))
+                  // the agents routed to it on any machine (a route for a whole machine names no agent)
+                  const uses = (target: string) => target.startsWith(p.id + '/') || (target.startsWith('group/') && !!state.groups.find((g) => `group/${g.id}` === target)?.members.some((m) => m.startsWith(p.id + '/')))
+                  const users = [...new Set(state.routes.filter((r) => r.agent && uses(r.target)).map((r) => r.agent))].map((agent) => ({ agent }))
                   return (
                     <a key={p.id} role="listitem" className={`lrow ${p.id === current?.id ? 'on' : ''} ${p.on ? '' : 'off'}`} href={href.models(p.id)} aria-current={p.id === current?.id ? 'true' : undefined}>
                       <ProviderMark provider={p} presets={state.presets} size={30} />

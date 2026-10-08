@@ -1,10 +1,10 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { getLang, t, useT } from './i18n'
 import { AgentIcon } from './AgentIcon'
-import { controlApi } from './api'
+import { controlApi, host } from './api'
 import { AGENT_NAME, fmtTokens, useControl } from './control'
 import { Icon } from './Icon'
-import { useApi, useMachine } from './machines'
+import { useMachine, useMachines } from './machines'
 import { go, href } from './route'
 import { PageHead } from './ui'
 import type { UsageDayRow } from './types'
@@ -60,10 +60,11 @@ type Focus = { days: number } | { day: string }
 
 export function UsagePage({ source }: { source: 'gateway' | 'history' }) {
   useT()
-  const { machine, sessions } = useMachine()
-  const api = useApi()
+  const { sessions } = useMachine()
+  const { machines } = useMachines()
   const { events } = useControl()
   const [rows, setRows] = useState<UsageDayRow[]>()
+  const [missing, setMissing] = useState<string[]>([])
   const [err, setErr] = useState<string>()
   const [focus, setFocus] = useState<Focus>({ days: 30 })
   const done = events.filter((e) => e.phase === 'done').length
@@ -72,9 +73,12 @@ export function UsagePage({ source }: { source: 'gateway' | 'history' }) {
   useEffect(() => {
     let live = true
     const since = daysAgo(2 * 371)
-    ;(source === 'gateway' ? controlApi.usageDays(since) : api.usage(since)).then((r) => { if (live) { setRows(r); setErr(undefined) } }, (e) => live && setErr((e as Error).message))
+    // history: each machine's own record, added up here; the gateway's requests are recorded with their machine
+    const get = source === 'gateway' ? controlApi.usageDays(since).then((rows) => ({ rows, missing: [] as string[] })) : host.usageMachines(since)
+    get.then((r) => { if (live) { setRows(r.rows); setMissing(r.missing); setErr(undefined) } }, (e) => live && setErr((e as Error).message))
     return () => { live = false }
-  }, [source, api, source === 'gateway' ? done : sessions])
+  }, [source, source === 'gateway' ? done : sessions])
+  const nameOf = (id?: string) => (!id || id === 'local' ? machines.find((m) => m.kind === 'local')?.name ?? t('This computer') : machines.find((m) => m.id === id)?.name ?? id)
 
   const byDay = useMemo(() => { const m = new Map<string, Tot>(); for (const r of rows ?? []) add(m.get(r.day) ?? m.set(r.day, zero()).get(r.day)!, r); return m }, [rows])
   const from = 'day' in focus ? focus.day : daysAgo(focus.days - 1)
@@ -92,11 +96,14 @@ export function UsagePage({ source }: { source: 'gateway' | 'history' }) {
   const project = useMemo(() => {
     const m = new Map(sessions.map((s) => [s.id, s]))
     return (r: UsageDayRow) => {
+      // another machine's sessions are not listed here: its work is named by the machine
+      if (r.machine && r.machine !== 'local') return t('On {machine}', { machine: nameOf(r.machine) })
       let s = r.sessionId ? m.get(r.sessionId) : undefined
       if (s?.parentId) s = m.get(s.parentId) ?? s // a sub-agent's work is its parent's project's
       return s && !s.project.generic ? s.project.name : t('Elsewhere')
     }
-  }, [sessions])
+  }, [sessions, machines])
+  const byMachine = useMemo(() => group(inFocus, (r) => r.machine ?? 'local'), [inFocus])
 
   const empty = rows && !rows.length
   const periodLabel = 'day' in focus ? fmtDate(focus.day, { weekday: 'long', month: 'long', day: 'numeric' }) : focus.days === 365 ? t('in the last year') : t('in the last {n} days', { n: focus.days })
@@ -108,11 +115,12 @@ export function UsagePage({ source }: { source: 'gateway' | 'history' }) {
         <div className="usage-title">
           <h1>{t('Usage')}</h1>
           <div className="seg usage-source" role="radiogroup" aria-label={t('Source')}>
-            <button role="radio" aria-checked={source === 'history'} className={source === 'history' ? 'on' : ''} onClick={() => go(href.usage('history'))} title={t('What the agents recorded in their own session files on {machine}', { machine: machine.name })}><Icon name="message" size={13} />{t('Session history')}</button>
+            <button role="radio" aria-checked={source === 'history'} className={source === 'history' ? 'on' : ''} onClick={() => go(href.usage('history'))} title={t('What the agents recorded in their own session files, on every machine')}><Icon name="message" size={13} />{t('Session history')}</button>
             <button role="radio" aria-checked={source === 'gateway'} className={source === 'gateway' ? 'on' : ''} onClick={() => go(href.usage())} title={t('Every request an agent sent through the gateway, with the tokens its provider reported.')}><Icon name="gateway" size={13} />{t('Gateway')}</button>
           </div>
         </div>
-        <p className="usage-lede">{source === 'gateway' ? t('Every request an agent sent through the gateway, with the tokens its provider reported.') : t('What the agents recorded on {machine}: each model call on the day it was made.', { machine: machine.name })}</p>
+        <p className="usage-lede">{source === 'gateway' ? t('Every request an agent sent through the gateway, with the tokens its provider reported.') : t('What the agents recorded on each machine: each model call on the day it was made.')}
+          {missing.length > 0 && <span className="usage-missing"> {t('Not included: {machines}, not connected.', { machines: missing.map(nameOf).join(', ') })}</span>}</p>
 
         {err ? <div className="form-error">{err}</div> : !rows ? <div className="uh-card uh-loading" /> : empty ? (
           <div className="empty-state compact">
@@ -150,6 +158,7 @@ export function UsagePage({ source }: { source: 'gateway' | 'history' }) {
               {source === 'gateway'
                 ? <Breakdown title={t('By route')} rows={group(inFocus, (r) => r.route ?? '—')} total={tokens(tot)} render={(k) => <a className="mono ellip" href={k.startsWith('group/') ? href.routing(k.slice(6)) : href.models(k.slice(0, k.indexOf('/')))}>{k}</a>} />
                 : <Breakdown title={t('By project')} rows={group(inFocus, project)} total={tokens(tot)} render={(k) => <span className="ellip">{k}</span>} />}
+              {byMachine.length > 1 && <Breakdown title={t('By machine')} rows={byMachine} total={tokens(tot)} render={(k) => <span className="ellip">{nameOf(k)}</span>} />}
             </div>
           </>
         )}

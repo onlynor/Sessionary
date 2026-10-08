@@ -130,19 +130,28 @@ export interface CtlPreset { id: string; name: string; kind: 'vendor' | 'local' 
 export interface CtlAgent {
   agent: string; model?: string; provider?: string; endpoint?: string; via: 'default' | 'custom' | 'magpie' | 'sessionary'; file?: string
   launch: 'env' | 'manual'; conflict?: string; target?: string; protocol: Protocol; reachable?: number; members?: number
+  /** where the route came from: its own, or inherited from the machine or the default for every machine */
+  level?: RouteLevel
+  /** a broader route this agent passes over: nothing in it speaks the agent's protocol */
+  skipped?: string
 }
+export type RouteLevel = 'session' | 'project' | 'agent' | 'machine' | 'default'
+/** one route: `machine` '' is every machine; `agent`, `project` (a directory) and `session` (a session id) narrow it */
+export interface CtlRoute { machine: string; agent: string; project: string; session: string; target: string; at: number }
 export interface CtlHealth { member: string; answering: number; restingUntil?: number; why?: string; lastOk?: number; lastFail?: number; lastStatus?: number }
 export interface RouteEvent {
-  id: string; at: number; agent: string; target: string; protocol: Protocol
+  id: string; at: number; agent: string; target: string; protocol: Protocol; machine?: string
   phase: 'trying' | 'answering' | 'failed' | 'done' | 'refused'; member?: string; status?: number; ms?: number; why?: string; input?: number; output?: number
 }
 export interface CtlState {
-  providers: CtlProvider[]; groups: CtlGroup[]; agents: CtlAgent[]; presets: CtlPreset[]; health: CtlHealth[]; recent: RouteEvent[]
+  providers: CtlProvider[]; groups: CtlGroup[]; routes: CtlRoute[]; agents: CtlAgent[]; presets: CtlPreset[]; health: CtlHealth[]; recent: RouteEvent[]
   gateway: { base: string; key: string; protocols: Record<Protocol, string> }
 }
 /** tokens on one day for one model, from one session (history) or through one route (gateway): src/core/usage.ts */
 export interface UsageDayRow {
   day: string; model: string; agent: string; sessionId?: string; route?: string
+  /** the machine it happened on (`local` or a node's id) */
+  machine?: string
   input: number; output: number; cacheRead: number; cacheWrite: number; requests: number; failed?: number; cost?: number
 }
 export interface UsageRow { at: number; agent: string; target: string; provider: string; model: string; protocol: Protocol; status: number; ms: number; input: number; output: number; cacheRead: number; error?: string; tries: number }

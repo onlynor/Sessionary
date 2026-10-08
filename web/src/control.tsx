@@ -4,7 +4,7 @@ import { t, useT } from './i18n'
 import { api, controlApi } from './api'
 import { Icon } from './Icon'
 import { Popover } from './SettingsMenu'
-import type { CtlGroup, CtlPreset, CtlProvider, CtlState, Protocol, RouteEvent } from './types'
+import type { CtlAgent, CtlGroup, CtlPreset, CtlProvider, CtlState, Machine, Protocol, RouteEvent } from './types'
 
 /**
  * Model Control on the page: one copy of the state for every page that shows it (Models, Routing, Gateway, Usage,
@@ -77,6 +77,23 @@ export function fmtTokens(n: number): string {
 }
 
 /** what a target is called on the page: a group by its name, a model by its name and provider */
+/**
+ * The routable agents on one machine and the route each starts on there. This computer's come with the state; a
+ * node's are asked for, again whenever any route changes (a node inherits from the default for every machine).
+ */
+export function useMachineRoutes(machine: Pick<Machine, 'id' | 'kind'>): CtlAgent[] | undefined {
+  const { state } = useControl()
+  const [agents, setAgents] = useState<CtlAgent[]>()
+  useEffect(() => {
+    if (machine.kind === 'local') { setAgents(state?.agents); return }
+    if (machine.kind !== 'ssh' || !state) { setAgents(undefined); return }
+    let live = true
+    controlApi.agents(machine.id).then((a) => live && setAgents(a), () => live && setAgents(undefined))
+    return () => { live = false }
+  }, [machine.id, machine.kind, state])
+  return agents
+}
+
 export function describeTarget(state: CtlState | undefined, target: string): { title: string; sub: string; provider?: CtlProvider; group?: CtlGroup; missing: boolean } {
   if (target.startsWith('group/')) {
     const g = state?.groups.find((x) => x.id === target.slice(6))

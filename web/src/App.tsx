@@ -173,7 +173,7 @@ function Window({ route, machine, lang, theme, setTheme, down }: { route: Route;
               : route.page === 'agent' ? <AgentPage route={route} />
               : route.page === 'chat' ? <ChatPage route={route} />
               : route.page === 'models' ? <ModelsPage provider={route.provider} add={route.add} />
-              : route.page === 'routing' ? <RoutingPage group={route.group} />
+              : route.page === 'routing' ? <RoutingPage group={route.group} machine={route.machine} />
               : route.page === 'gateway' ? <GatewayPage />
               : route.page === 'usage' ? <UsagePage source={route.source} />
               : <SessionPage route={route} />}

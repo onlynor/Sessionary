@@ -8,10 +8,11 @@ import { relAgo, relTime } from './format'
 import { Icon } from './Icon'
 import { useInstalled, useMachine, useMachines, useSystem, usable } from './machines'
 import { MonitorTab } from './MonitorTab'
-import { TargetMark, describeTarget, useControl } from './control'
+import { TargetMark, describeTarget, useControl, useMachineRoutes } from './control'
 import { ProjectsTab, SessionsTab, TrashTab, useTrashCount, projectsOf, type MachineRoute } from './MachineTabs'
 import { go, href, type MachineTab } from './route'
 import { TerminalTab } from './TerminalTab'
+import type { CtlAgent } from './types'
 import { Bar, Gauge, MachineIcon, MoreMenu, OfflinePanel, PageHead, StateBadge, Tabs, ToolbarSlot, fmtBytes, fmtUptime, machineTarget, useUi } from './ui'
 
 /** The agents this machine has: what is installed, how much history each holds, and a way into each. */
@@ -24,6 +25,8 @@ function AgentsTab() {
   const [syncing, setSyncing] = useState(false)
   const projects = projectsOf(sessions)
   const control = useControl()
+  // what each agent starts on here: this machine's routes, not another's
+  const routes = useMachineRoutes(machine)
 
   return (
     <>
@@ -57,7 +60,7 @@ function AgentsTab() {
                   <span className={`ac-dot ${state === 'desktop' ? 'available' : state}`} />
                   {state === 'available' || state === 'desktop' ? t('Available') : state === 'history' ? t('Not found on PATH') : state === 'missing' ? t('Not installed') : t('Checking…')}
                 </div>
-                {machine.kind !== 'url' && <AgentRoute agent={a.id} control={control} here={machine.kind === 'local'} />}
+                {machine.kind !== 'url' && <AgentRoute agent={a.id} control={control} routes={routes} machine={machine.id} here={machine.kind === 'local'} />}
                 <div className="agent-nums">
                   <div><b>{a.sessionCount}</b><span>{t('Sessions')}</span></div>
                   <div><b>{nProjects}</b><span>{t('Projects')}</span></div>
@@ -90,15 +93,15 @@ function AgentsTab() {
 }
 
 /**
- * which model a routable agent is started on from Sessionary, and the way to change it; on an ssh node the same
- * binding applies (through a tunnel), but what the agent is set to by itself is only known for this computer
+ * which model a routable agent is started on from Sessionary on this machine, and the way to change it; on an ssh
+ * node its route reaches it through a tunnel, but what the agent is set to by itself is only known for this computer
  */
-function AgentRoute({ agent, control, here }: { agent: string; control: ReturnType<typeof useControl>; here: boolean }) {
-  const a = control.state?.agents.find((x) => x.agent === agent)
+function AgentRoute({ agent, control, routes, machine, here }: { agent: string; control: ReturnType<typeof useControl>; routes?: CtlAgent[]; machine: string; here: boolean }) {
+  const a = routes?.find((x) => x.agent === agent)
   if (!a) return null
   const d = a.target ? describeTarget(control.state, a.target) : undefined
   return (
-    <a className="ac-route" href={href.routing()} title={t('Choose the model on Routing')}>
+    <a className="ac-route" href={href.routing(undefined, machine)} title={t('Choose the model on Routing')}>
       {a.target ? <TargetMark target={a.target} size={16} /> : <Icon name="route" size={13} />}
       <span className="ellip">{d ? <><b>{d.title}</b> · {t('through the gateway')}</> : here && a.via === 'magpie' ? t('Its own setting, through Magpie') : t('Its own model setting')}</span>
       <Icon name="chev" size={11} />

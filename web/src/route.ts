@@ -15,7 +15,7 @@ import { useEffect, useState } from 'react'
  * Model Control is about this computer (its gateway), whichever machine is open:
  *
  *   #/models[/<provider>][?add=1]      providers and their models
- *   #/routing[/<group>]                which agent uses what; routing groups
+ *   #/routing[/<group>][?m=<machine>]  which agent uses what on a machine (m= for every machine); routing groups
  *   #/gateway                          the local endpoint agents are pointed at
  *   #/usage[?src=history]              what went through it (or what sessions recorded)
  *
@@ -33,7 +33,7 @@ export type Route =
   | { page: 'session'; machine: string; id: string; view: 'chat' | 'changes'; q?: string; m?: number }
   | { page: 'chat'; machine: string; id: string }
   | { page: 'models'; provider?: string; add: boolean }
-  | { page: 'routing'; group?: string }
+  | { page: 'routing'; group?: string; machine: string }
   | { page: 'gateway' }
   | { page: 'usage'; source: 'gateway' | 'history' }
 
@@ -45,7 +45,7 @@ export function parseRoute(hash = location.hash): Route {
   if (!a) return { page: 'home' }
   if (a === 'machines') return { page: 'machines' }
   if (a === 'models') return { page: 'models', provider: b, add: params.has('add') }
-  if (a === 'routing') return { page: 'routing', group: b }
+  if (a === 'routing') return { page: 'routing', group: b, machine: params.get('m') ?? 'local' }
   if (a === 'gateway') return { page: 'gateway' }
   if (a === 'usage') return { page: 'usage', source: params.get('src') === 'history' ? 'history' : 'gateway' }
   if (a === 'nodes') return { page: 'nodes', add: params.has('add'), edit: params.get('edit') ?? undefined }
@@ -76,7 +76,8 @@ export const href = {
   chat: (machine: string, id: string) => `#/m/${enc(machine)}/c/${enc(id)}`,
   session: (machine: string, id: string, q?: Record<string, string | undefined>) => `#/m/${enc(machine)}/s/${enc(id)}${qs(q)}`,
   models: (provider?: string, q?: { add?: string }) => `#/models${provider ? '/' + enc(provider) : ''}${qs(q)}`,
-  routing: (group?: string) => `#/routing${group ? '/' + enc(group) : ''}`,
+  /** `machine` '' is the default for every machine; omitted: this computer */
+  routing: (group?: string, machine?: string) => `#/routing${group ? '/' + enc(group) : ''}${machine === undefined || machine === 'local' ? '' : `?m=${enc(machine)}`}`,
   gateway: '#/gateway',
   usage: (source?: 'history') => `#/usage${qs({ src: source })}`,
 }

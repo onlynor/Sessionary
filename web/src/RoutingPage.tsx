@@ -2,22 +2,30 @@ import { useMemo, useState } from 'react'
 import { t, tx, useT } from './i18n'
 import { AgentIcon } from './AgentIcon'
 import { controlApi } from './api'
-import { AGENT_NAME, GroupMark, ModelPicker, PROTOCOL_NAME, ProviderMark, Switch, TargetButton, describeTarget, restText, useControl, useTick, whyText } from './control'
+import { AGENT_NAME, GroupMark, ModelPicker, PROTOCOL_NAME, ProviderMark, Switch, TargetButton, describeTarget, restText, useControl, useMachineRoutes, useTick, whyText } from './control'
 import { Icon } from './Icon'
 import { go, href } from './route'
-import { MoreMenu, PageHead, useUi } from './ui'
-import type { CtlAgent, CtlGroup, CtlState, RouteEvent } from './types'
+import { useMachines } from './machines'
+import { MoreMenu, PageHead, shortPath, useUi } from './ui'
+import type { CtlAgent, CtlGroup, CtlRoute, CtlState, Machine, RouteEvent } from './types'
 
 /**
- * Routing: which agent uses what (each agent's row holds its model picker), then the routing groups — models an
- * agent picks as one, tried in order or in turn — each with a live picture of where its requests go.
+ * Routing: which agent uses what, per machine (each agent's row holds its model picker), then the routing groups —
+ * models an agent picks as one, tried in order or in turn — each with a live picture of where its requests go.
+ *
+ * A route belongs to a machine: what is chosen for Pi on one node never moves Pi on another. Each machine's agents
+ * inherit, in order, from their session, project, agent, the machine, and the default for every machine (`machine` '').
  */
-export function RoutingPage({ group: chosen }: { group?: string }) {
+export function RoutingPage({ group: chosen, machine: scope }: { group?: string; machine: string }) {
   useT()
   const { state, reload } = useControl()
+  const { machines } = useMachines()
   const ui = useUi()
   const groups = state?.groups ?? []
   const current = groups.find((g) => g.id === chosen) ?? groups[0]
+  // the machines Sessionary starts agents on: this computer and the nodes it reaches over ssh
+  const routable = machines.filter((m) => m.kind === 'local' || m.kind === 'ssh')
+  const open = scope === '' ? undefined : routable.find((m) => m.id === scope) ?? routable.find((m) => m.kind === 'local')
 
   const newGroup = () => ui.prompt({
     title: t('New routing group'), label: t('Name'), value: '', confirm: t('Create'), placeholder: t('Daily coding'),
@@ -36,10 +44,14 @@ export function RoutingPage({ group: chosen }: { group?: string }) {
         <h1>{t('Routing')}</h1>
         <p className="page-lede">{t('Choose the model each agent uses. A routing group is several models an agent picks as one: when one cannot answer, the next one does.')}</p>
 
-        <div className="section-label row-label"><span>{t('Agents')}</span><span className="grow" /><span className="r-meta">{t('applies to sessions Sessionary starts, here and on SSH nodes')}</span></div>
-        {!state ? <div className="sk-line" /> : (
+        <div className="section-label row-label"><span>{t('Agents')}</span><span className="grow" /><span className="r-meta">{t('applies to sessions Sessionary starts on that machine')}</span></div>
+        <div className="seg sm route-scope" role="radiogroup" aria-label={t('Machine')}>
+          <button role="radio" aria-checked={!open} className={!open ? 'on' : ''} onClick={() => go(href.routing(chosen, ''))} title={t('What every agent on every machine starts on, unless the machine or the agent says otherwise')}>{t('Every machine')}</button>
+          {routable.map((m) => <button key={m.id} role="radio" aria-checked={open?.id === m.id} className={open?.id === m.id ? 'on' : ''} onClick={() => go(href.routing(chosen, m.id))}>{m.name}</button>)}
+        </div>
+        {!state ? <div className="sk-line" /> : open ? <MachineRoutes key={open.id} machine={open} state={state} /> : (
           <div className="group-card bind-list">
-            {state.agents.map((a) => <AgentRow key={a.agent} a={a} />)}
+            <ScopeRow state={state} scope={{ machine: '' }} title={t('Every agent, on every machine')} sub={t('The default: a machine or an agent with its own route does not use it.')} />
           </div>
         )}
 
@@ -91,26 +103,103 @@ const viaText = (a: CtlAgent) => {
   }
 }
 
-/** one agent: what it runs on by itself, and what Sessionary starts it with */
-function AgentRow({ a }: { a: CtlAgent }) {
-  useT()
+type Scope = { machine: string; agent?: string; project?: string; session?: string }
+const ownRoute = (state: CtlState, s: Scope) => state.routes.find((r) => r.machine === s.machine && r.agent === (s.agent ?? '') && r.project === (s.project ?? '') && r.session === (s.session ?? ''))
+
+/** sets or clears one scope's route, and says what changed */
+function useSetRoute() {
   const ui = useUi()
   const { reload } = useControl()
-  const name = AGENT_NAME[a.agent] ?? a.agent
-  const bind = async (target: string) => {
-    try { await controlApi.bind(a.agent, target); await reload(); ui.say(target ? t('{agent} now starts on {target} from Sessionary', { agent: name, target }) : t('{agent} starts on its own default again', { agent: name })) } catch (e) { ui.say((e as Error).message) }
+  return async (scope: Scope, target: string, said: string) => {
+    try { await controlApi.route(scope, target); await reload(); ui.say(said) } catch (e) { ui.say((e as Error).message) }
   }
+}
+
+/** a route for a whole scope (every machine, or every agent on one machine) */
+function ScopeRow({ state, scope, title, sub, inherited }: { state: CtlState; scope: Scope; title: string; sub: string; inherited?: string }) {
+  useT()
+  const set = useSetRoute()
+  const own = ownRoute(state, scope)?.target
+  return (
+    <div className="bind-row">
+      <span className="app-tile scope-tile"><Icon name={scope.machine ? 'server' : 'route'} size={20} /></span>
+      <span className="bind-text">
+        <span className="bind-name">{title}</span>
+        <span className="bind-sub">{sub}</span>
+      </span>
+      <span className="bind-pick"><TargetButton value={own} onChange={(v) => set(scope, v, v ? t('{scope} now starts on {target}', { scope: title, target: v }) : t('{scope} no longer has a route of its own', { scope: title }))}
+        defaultLabel={inherited ? t('inherits {target}', { target: inherited }) : t('each agent’s own setting')} placeholder={inherited ? t('inherits {target}', { target: inherited }) : undefined} /></span>
+    </div>
+  )
+}
+
+/** one machine: a route for all its agents, each agent's own, and the project and session routes made there */
+function MachineRoutes({ machine, state }: { machine: Machine; state: CtlState }) {
+  useT()
+  const set = useSetRoute()
+  const agents = useMachineRoutes(machine)
+  const narrow = state.routes.filter((r) => r.machine === machine.id && (r.project || r.session))
+  const fallback = ownRoute(state, { machine: '' })?.target
+  return (
+    <>
+      <div className="group-card bind-list">
+        <ScopeRow state={state} scope={{ machine: machine.id }} title={t('Every agent on {machine}', { machine: machine.name })}
+          sub={t('Agents on {machine} without a route of their own start on this.', { machine: machine.name })} inherited={fallback} />
+        {!agents ? <div className="sk-line" /> : agents.map((a) => <AgentRow key={a.agent} a={a} machine={machine} state={state} />)}
+      </div>
+      {narrow.length > 0 && (
+        <>
+          <div className="section-label row-label"><span>{t('Projects and sessions on {machine}', { machine: machine.name })}</span><span className="grow" /><span className="r-meta">{t('these win over the agent’s route')}</span></div>
+          <div className="group-card bind-list">
+            {narrow.map((r) => <NarrowRow key={`${r.agent}|${r.project}|${r.session}`} r={r} onClear={() => set(r, '', t('The route was removed'))} />)}
+          </div>
+        </>
+      )}
+    </>
+  )
+}
+
+const LEVEL_TEXT = (a: CtlAgent, machine: string) =>
+  a.level === 'machine' ? t('inherits {target} from {machine}', { target: a.target!, machine }) : a.level === 'default' ? t('inherits {target} from every machine', { target: a.target! }) : undefined
+
+/** one agent on one machine: what it runs on by itself (known only here), and what Sessionary starts it with */
+function AgentRow({ a, machine, state }: { a: CtlAgent; machine: Machine; state: CtlState }) {
+  useT()
+  const set = useSetRoute()
+  const name = AGENT_NAME[a.agent] ?? a.agent
+  const own = ownRoute(state, { machine: machine.id, agent: a.agent })?.target
+  const inherited = own ? undefined : LEVEL_TEXT(a, machine.name)
+  const pick = (target: string) => set({ machine: machine.id, agent: a.agent }, target, target
+    ? t('{agent} on {machine} now starts on {target}', { agent: name, machine: machine.name, target })
+    : t('{agent} on {machine} no longer has a route of its own', { agent: name, machine: machine.name }))
   return (
     <div className="bind-row">
       <span className={`app-tile at-${a.agent}`}><AgentIcon agent={a.agent} size={22} /></span>
       <span className="bind-text">
         <span className="bind-name">{name}</span>
-        <span className="bind-sub" title={a.file}>{viaText(a)}</span>
+        <span className="bind-sub" title={a.file}>{machine.kind === 'local' ? viaText(a) : inherited ?? t('By itself: what it is set to on {machine}', { machine: machine.name })}</span>
+        {machine.kind === 'local' && inherited && <span className="bind-sub">{inherited}</span>}
+        {a.skipped && <span className="bind-note"><Icon name="route" size={12} />{t('Passes over {target}: nothing in it speaks {protocol}.', { target: a.skipped, protocol: PROTOCOL_NAME[a.protocol] })}</span>}
         {a.target && a.reachable === 0 && <span className="bind-warn"><Icon name="warn" size={12} />{t('Nothing in {target} can answer {agent}: it needs a model whose provider speaks {protocol}.', { target: a.target, agent: name, protocol: PROTOCOL_NAME[a.protocol] })}</span>}
         {a.target && a.launch === 'manual' && <span className="bind-note"><Icon name="gateway" size={12} />{tx('Sessionary cannot start {agent} with this yet — {link}.', { agent: name, link: <a href={href.gateway}>{t('set it up by hand')}</a> })}</span>}
         {a.target && a.conflict && <span className="bind-warn"><Icon name="warn" size={12} />{t('Its settings set {key}, which wins over how Sessionary starts it.', { key: a.conflict })}</span>}
       </span>
-      <span className="bind-pick"><TargetButton value={a.target} onChange={bind} defaultLabel={t('what {agent} is set to', { agent: name })} protocol={a.protocol} /></span>
+      <span className="bind-pick"><TargetButton value={own} onChange={pick} defaultLabel={inherited ? t('inherits {target}', { target: a.target! }) : t('what {agent} is set to', { agent: name })} placeholder={inherited ? t('inherits {target}', { target: a.target! }) : undefined} protocol={a.protocol} /></span>
+    </div>
+  )
+}
+
+/** a route made for one project or one session */
+function NarrowRow({ r, onClear }: { r: CtlRoute; onClear: () => void }) {
+  useT()
+  return (
+    <div className="bind-row">
+      <span className={`app-tile at-${r.agent}`}><AgentIcon agent={r.agent} size={22} /></span>
+      <span className="bind-text">
+        <span className="bind-name">{AGENT_NAME[r.agent] ?? r.agent} · {r.session ? t('one session') : t('one project')}</span>
+        <span className="bind-sub mono ellip" title={r.session || r.project}>{r.session ? r.session.slice(r.session.indexOf(':') + 1) : shortPath(r.project)}</span>
+      </span>
+      <span className="bind-pick row-gap"><span className="mono ellip">{r.target}</span><button className="btn icon sm danger-quiet" onClick={onClear} aria-label={t('Remove this route')}><Icon name="x" size={13} /></button></span>
     </div>
   )
 }
