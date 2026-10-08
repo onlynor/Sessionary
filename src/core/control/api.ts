@@ -1,12 +1,15 @@
 import { type Context, Hono } from 'hono'
 import { getRequestListener } from '@hono/node-server'
 import { randomBytes } from 'node:crypto'
+import fs from 'node:fs'
 import http from 'node:http'
-import { agentModelState, launchProfile, PROTOCOL_OF, ROUTABLE, snippet, type LaunchProfile } from './agents.ts'
+import path from 'node:path'
+import { dataHome } from '../util.ts'
+import { agentModelState, FILES, LAUNCHABLE, launchProfile, PROTOCOL_OF, ROUTABLE, snippet, type LaunchProfile } from './agents.ts'
 import { detectMagpie, listModels, mergeModels } from './catalog.ts'
-import { createGateway, type RouteEvent, Router, sameSecret } from './gateway.ts'
+import { type Caller, createGateway, type RouteEvent, Router, sameSecret } from './gateway.ts'
 import { PRESETS, presetOf } from './presets.ts'
-import { ControlError, type ControlStore, type Group, maskKey, MODEL_RE, PROTOCOLS, type Protocol, type Provider, slug, validEndpoint } from './store.ts'
+import { ControlError, type ControlStore, type Group, maskKey, MODEL_RE, PROTOCOLS, type Protocol, type Provider, type RouteScope, slug, validEndpoint } from './store.ts'
 
 /**
  * Model Control's HTTP side: `/gateway/*` for agents (its own key), `/api/control/*` for the page (the app's token
@@ -20,6 +23,8 @@ export interface ControlOptions {
   pickPort?: () => number
   /** a node reached over ssh: its sessions can get a tunnel back to the gateway */
   sshNode?: (machine: string) => boolean
+  /** the machines routes may be set for (`local` and the nodes) */
+  machines?: () => string[]
   broadcast: (event: string, data: unknown) => void
 }
 
@@ -29,7 +34,10 @@ const DAY_RE = /^\d{4}-\d{2}-\d{2}$/
 /** a port for one session's tunnel on a node: random in a range services rarely use, so two sessions do not collide */
 export const tunnelPort = () => 20_000 + Math.floor(Math.random() * 30_000)
 
-/** how a bound agent is started: its profile, and on a node the tunnel and the door it leads to */
+/** where in a machine a session is: its project (working directory) and its session id (`agent:native id`) */
+export interface LaunchAt { project?: string; session?: string }
+
+/** how a routed agent is started: its profile, and on a node the tunnel and the door it leads to */
 export interface Launch extends LaunchProfile {
   tunnel?: { remotePort: number; localPort: number }
   /** closes the session's door; call it when the session's process has ended (safe to call more than once) */
@@ -58,10 +66,10 @@ export function registerControl(app: Hono, o: ControlOptions) {
    * node whose sshd publishes forwarded ports) is worth at most this session, for as long as it runs.
    */
   const doors = new Set<Door>()
-  const openDoor = async (agent: string): Promise<Door> => {
+  const openDoor = async (caller: Caller): Promise<Door> => {
     const token = `sk-sessionary-session-${randomBytes(24).toString('base64url')}`
     const app = new Hono()
-    app.route('/gateway', createGateway({ store, router, emit, authorize: (key) => (sameSecret(key, token) ? agent : null) }))
+    app.route('/gateway', createGateway({ store, router, emit, authorize: (key) => (sameSecret(key, token) ? caller : null) }))
     app.all('*', (c) => c.json({ error: { message: 'Only the gateway answers here.' } }, 404))
     const server = http.createServer(getRequestListener(app.fetch))
     await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve) })
@@ -108,24 +116,32 @@ export function registerControl(app: Hono, o: ControlOptions) {
     return out
   }
 
-  const agents = () => {
-    const bindings = new Map(store.bindings().map((b) => [b.agent, b.target]))
-    return ROUTABLE.map((a) => {
-      const target = bindings.get(a)
-      const plan = target ? router.plan(target, PROTOCOL_OF[a]!) : undefined
-      return {
-        ...agentModelState(a, undefined, o.gatewayBase()), target, protocol: PROTOCOL_OF[a],
-        // how many members could answer this agent: the gateway does not translate between protocols
-        ...(plan && { reachable: plan.candidates.length, members: router.members(target!).length }),
-      }
-    })
-  }
+  /** a target this agent can be sent to: some member speaks its protocol */
+  const serves = (agent: string) => (target: string) => router.plan(target, PROTOCOL_OF[agent] ?? 'chat').candidates.length > 0
+  const machines = () => o.machines?.() ?? ['local']
 
+  /** each routable agent on one machine: the route it starts on and where that came from (what it runs on by itself is known only here) */
+  const agents = (machine: string) => ROUTABLE.map((a) => {
+    const own = store.resolve(machine, a, {})
+    const r = store.resolve(machine, a, {}, serves(a))
+    const plan = r ? router.plan(r.target, PROTOCOL_OF[a]!) : undefined
+    return {
+      ...(machine === 'local' ? agentModelState(a, undefined, o.gatewayBase()) : { agent: a, via: 'default' as const, launch: LAUNCHABLE.has(a) ? 'env' as const : 'manual' as const }),
+      target: r?.target, level: r?.level, protocol: PROTOCOL_OF[a],
+      // a broader route this agent cannot use (no member speaks its protocol) is passed over, and said so
+      ...(own && own.target !== r?.target && { skipped: own.target }),
+      // how many members could answer this agent: the gateway does not translate between protocols
+      ...(plan && { reachable: plan.candidates.length, members: router.members(r!.target).length }),
+    }
+  })
+  const machineOf = (c: Context) => { const m = c.req.query('machine') ?? 'local'; return machines().includes(m) ? m : 'local' }
+
+  app.get('/api/control/agents', (c) => c.json(agents(machineOf(c))))
   app.get('/api/control/state', (c) => c.json({
     providers: store.providers().map(publicProvider),
     groups: store.groups(),
-    bindings: store.bindings(),
-    agents: agents(),
+    routes: store.routes(),
+    agents: agents('local'),
     presets: PRESETS,
     gateway: { base: o.gatewayBase(), key: maskKey(store.gatewayKey()), protocols: { anthropic: '/v1/messages', chat: '/v1/chat/completions', responses: '/v1/responses' } },
     health: router.health(),
@@ -198,16 +214,27 @@ export function registerControl(app: Hono, o: ControlOptions) {
   })
   app.delete('/api/control/groups/:id', (c) => { store.removeGroup(c.req.param('id')); return c.json({ ok: true }) })
 
-  // ---- agents ----
-  app.post('/api/control/bindings', async (c) => {
+  // ---- routes ----
+  /** a scope from the page: a known machine (or '' for every machine), then optionally an agent, a project or a session */
+  const scopeFrom = (b: any): RouteScope => {
+    const machine = String(b.machine ?? '')
+    if (machine && !machines().includes(machine)) throw new ControlError('No such machine.', 404)
+    const agent = String(b.agent ?? '')
+    if (agent && !(ROUTABLE as readonly string[]).includes(agent)) throw new ControlError('Sessionary cannot route this agent.')
+    const project = typeof b.project === 'string' ? b.project.trim().slice(0, 1024) : ''
+    const session = typeof b.session === 'string' ? b.session.trim().slice(0, 256) : ''
+    if ((project || session) && (!machine || !agent)) throw new ControlError('A project or session route belongs to one agent on one machine.')
+    if (project && session) throw new ControlError('A route is for a project or for a session, not both.')
+    return { machine, agent, project, session }
+  }
+  app.post('/api/control/routes', async (c) => {
     try {
       const b = await body(c)
-      const agent = String(b.agent ?? '')
-      if (!(ROUTABLE as readonly string[]).includes(agent)) throw new ControlError('Sessionary cannot route this agent.')
+      const scope = scopeFrom(b)
       const target = String(b.target ?? '')
       if (target) checkTarget(target)
-      store.bind(agent, target)
-      return c.json({ ok: true, agents: agents() })
+      store.setRoute(scope, target)
+      return c.json({ ok: true, routes: store.routes(), agents: agents(scope.machine || 'local') })
     } catch (e) { return fail(c, e) }
   })
   app.post('/api/control/members/wake', async (c) => { router.wake(String((await body(c)).member ?? '')); return c.json({ ok: true }) })
@@ -232,19 +259,32 @@ export function registerControl(app: Hono, o: ControlOptions) {
    * a port on the node's loopback to a door opened for this session alone; the caller must `release` it when the
    * session's process ends, however it ends.
    */
-  const launchFor = async (agent: string, machine: string): Promise<Launch | undefined> => {
-    const target = store.binding(agent)?.target
+  const launchFor = async (agent: string, machine: string, at: LaunchAt = {}): Promise<Launch | undefined> => {
+    const target = store.resolve(machine, agent, at, serves(agent))?.target
     if (!target) return undefined
     if (machine === 'local') {
       const p = launchProfile(agent, target, o.gatewayBase(), `${store.gatewayKey()}.${agent}`)
-      // here the key is just part of the environment the process is started with
-      return p && { ...p, env: { ...p.env, [p.secret.name]: p.secret.value } }
+      if (!p) return undefined
+      // here the key is just part of the environment the process is started with, and the files are written once
+      const dir = p.files ? writeFiles(p.files) : ''
+      return { ...p, env: { ...p.env, [p.secret.name]: p.secret.value }, args: p.args.map((a) => a.split(FILES).join(dir)) }
     }
     if (!o.sshNode?.(machine) || !launchProfile(agent, target, '', '')) return undefined
-    const door = await openDoor(agent)
+    const door = await openDoor({ agent, machine, target })
     const tunnel = { remotePort: (o.pickPort ?? tunnelPort)(), localPort: door.port }
     const p = launchProfile(agent, target, `http://127.0.0.1:${tunnel.remotePort}/gateway`, door.token)!
     return { ...p, tunnel, release: door.close }
   }
   return { router, launchFor, doors: () => doors.size, closeDoors: () => { for (const d of [...doors]) d.close() } }
+}
+
+/** Sessionary's own helper files for agents it starts here (they hold no secret): written once, read by the agent */
+function writeFiles(files: Record<string, string>): string {
+  const dir = path.join(dataHome(), 'launch')
+  fs.mkdirSync(dir, { recursive: true })
+  for (const [name, content] of Object.entries(files)) {
+    const f = path.join(dir, name)
+    if (fs.readFileSync(f, { encoding: 'utf8', flag: 'a+' }) !== content) fs.writeFileSync(f, content)
+  }
+  return dir
 }

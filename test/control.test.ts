@@ -61,19 +61,21 @@ function makeApp() {
 }
 const provider = (id: string, endpoints: Record<string, string>, models = ['m1']) => ({ id, name: id, preset: 'custom-openai', endpoints, key: 'sk-test-' + id, models: models.map((m) => ({ id: m, on: true })), on: true, at: Date.now() })
 
-test('removing a provider takes its models out of groups and unbinds agents that used one', () => {
+test('removing a provider takes its models out of groups and removes the routes that used one', () => {
   const s = new ControlStore(':memory:')
   s.saveProvider(provider('a', { chat: 'http://a' }))
   s.saveProvider(provider('b', { chat: 'http://b' }))
   s.saveGroup({ id: 'g', name: 'G', mode: 'order', members: ['a/m1', 'b/m1'], on: true, at: 1 })
-  s.bind('codex', 'a/m1')
-  s.bind('opencode', 'group/g')
+  s.setRoute({ machine: 'local', agent: 'codex' }, 'a/m1')
+  s.setRoute({ machine: 'vps', agent: 'codex', session: 'codex:t1' }, 'a/m1')
+  s.setRoute({ machine: 'local', agent: 'opencode' }, 'group/g')
   s.removeProvider('a')
   assert.deepEqual(s.group('g')!.members, ['b/m1'])
-  assert.equal(s.binding('codex'), undefined)
-  assert.equal(s.binding('opencode')!.target, 'group/g')
+  assert.equal(s.resolve('local', 'codex'), undefined)
+  assert.equal(s.resolve('vps', 'codex', { session: 'codex:t1' }), undefined)
+  assert.equal(s.resolve('local', 'opencode')!.target, 'group/g')
   s.removeGroup('g')
-  assert.equal(s.binding('opencode'), undefined)
+  assert.equal(s.resolve('local', 'opencode'), undefined)
 })
 
 test('the gateway key outlives a restart; a page sees keys only masked', () => {
@@ -175,11 +177,11 @@ test('members that cannot speak the protocol are left out, and the agent is told
   assert.match(body.error.message, /speaks this protocol \(anthropic\)/)
 })
 
-test('a model the gateway does not know is served by the asking agent\'s binding', async () => {
+test('a model the gateway does not know is served by the asking agent\'s route', async () => {
   const good = await upstream((_r, body, res) => { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ id: 'x', model: body.model, usage: { prompt_tokens: 3, completion_tokens: 1 } })) })
   const { control, gw } = makeApp()
   control.saveProvider(provider('p', { chat: good.url + '/v1' }, ['real']))
-  control.bind('opencode', 'p/real')
+  control.setRoute({ machine: 'local', agent: 'opencode' }, 'p/real')
   const res = await gw('/v1/chat/completions', { model: 'some-helper-model', messages: [] }, { 'x-api-key': '', authorization: `Bearer ${control.gatewayKey()}.opencode` })
   assert.equal(res.status, 200)
   await res.text() // usage is recorded once the reply has been read through
@@ -206,11 +208,11 @@ test('the page adds a provider: the model list is read from it, and the key neve
   assert.equal(listing.seen[0]!.headers.authorization, 'Bearer sk-secret-123456789')
   const state = await (await req('/api/control/state')).text()
   assert.ok(!state.includes('sk-secret-123456789'))
-  // a group with a model that does not exist is refused; binding to a group works
+  // a group with a model that does not exist is refused; routing an agent to a group works
   assert.equal((await req('/api/control/groups', { method: 'POST', body: JSON.stringify({ name: 'Bad', members: ['nobody/x'] }) })).status, 404)
   const g = await (await req('/api/control/groups', { method: 'POST', body: JSON.stringify({ name: 'Daily coding', members: ['my-relay/alpha'] }) })).json() as any
   assert.equal(g.id, 'daily-coding')
-  const bound = await (await req('/api/control/bindings', { method: 'POST', body: JSON.stringify({ agent: 'opencode', target: 'group/daily-coding' }) })).json() as any
+  const bound = await (await req('/api/control/routes', { method: 'POST', body: JSON.stringify({ machine: 'local', agent: 'opencode', target: 'group/daily-coding' }) })).json() as any
   const oc = bound.agents.find((a: any) => a.agent === 'opencode')
   assert.equal(oc.target, 'group/daily-coding')
   assert.equal(oc.reachable, 1)
@@ -245,7 +247,7 @@ test('what each agent runs on by itself is read from its own configuration', () 
   assert.equal(tomlTables('a = 1\n[t.u]\nb = "c"').get('t.u')!.b, 'c')
 })
 
-test('a binding reaches an agent only through how Sessionary starts it, the key kept apart from the rest', () => {
+test('a route reaches an agent only through how Sessionary starts it, the key kept apart from the rest', () => {
   const claude = launchProfile('claude-code', 'group/daily', 'http://127.0.0.1:4777/gateway', 'k')!
   assert.equal(claude.env.ANTHROPIC_BASE_URL, 'http://127.0.0.1:4777/gateway')
   assert.deepEqual(claude.secret, { name: 'ANTHROPIC_AUTH_TOKEN', value: 'k' })
@@ -258,7 +260,14 @@ test('a binding reaches an agent only through how Sessionary starts it, the key 
   const raw = launchProfile('opencode', 'p/m', 'http://g', 'secret-key')!.env.OPENCODE_CONFIG_CONTENT!
   assert.ok(!raw.includes('secret-key'))
   assert.equal(JSON.parse(raw).provider.sessionary.options.apiKey, '{env:SESSIONARY_GATEWAY_KEY}')
-  assert.equal(launchProfile('pi', 'p/m', 'http://g', 'k'), undefined)
+  // Pi: Sessionary's own extension registers the provider for this run; nothing in Pi's files
+  const pi = launchProfile('pi', 'p/m', 'http://g', 'k')!
+  assert.deepEqual(pi.args, ['-e', '{sessionary-files}/pi-sessionary.mjs'])
+  assert.equal(pi.env.SESSIONARY_MODEL, 'p/m')
+  assert.equal(pi.session!.model, 'sessionary/p/m')
+  assert.ok(!JSON.stringify(pi.env).includes('"k"') && !pi.files!['pi-sessionary.mjs']!.includes('"k"'))
+  // Hermes keeps its configured provider's endpoint for a session (and saves it): a route is set up by hand only
+  assert.equal(launchProfile('hermes', 'p/m', 'http://g', 'k'), undefined)
 })
 
 /** a bound Claude Code, Model Control registered on its own, and a request helper that goes over real HTTP */
@@ -267,7 +276,8 @@ async function remoteSetup() {
   const { Hono } = await import('hono')
   const s = new ControlStore(':memory:')
   s.saveProvider(provider('p', { anthropic: 'http://a' }))
-  s.bind('claude-code', 'p/m1')
+  // the default for every machine: Claude Code here and on the node
+  s.setRoute({ machine: '' }, 'p/m1')
   const c = registerControl(new Hono(), { store: s, gatewayBase: () => 'http://127.0.0.1:4777/gateway', broadcast: () => {}, sshNode: (id) => id === 'vps', pickPort: () => 23456 })
   const get = (port: number, path: string, key?: string) => fetch(`http://127.0.0.1:${port}${path}`, { headers: key ? { authorization: `Bearer ${key}` } : {} }).then((r) => r.status, () => 'refused' as const)
   return { s, c, get }

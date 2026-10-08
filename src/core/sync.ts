@@ -1,3 +1,4 @@
+import { FILES } from './control/agents.ts'
 import { spawn, spawnSync } from 'node:child_process'
 import fs from 'node:fs/promises'
 import os from 'node:os'
@@ -316,11 +317,18 @@ export const posix = (s: string) => (/^[\w@%+=:,./-]+$/.test(s) ? s : `'${s.repl
  * shell so the node's PATH (npm, ~/.local/bin) applies, in `cwd`, with `env` and the session's secret (see
  * `secretPrelude`). What the shell itself prints while it starts (a broken line in .bashrc, "no job control") is
  * dropped and the program's own stderr kept, so an error the page shows is the program's.
+ *
+ * `files` are Sessionary's own helper files the program loads (no secrets): written first to
+ * `~/.cache/sessionary/launch` on the node, the directory that `FILES` in `args` stands for.
  */
-export function loginExec(o: { bin: string; args: string[]; cwd?: string; env?: Record<string, string>; secret?: { name: string } }): string {
+export function loginExec(o: { bin: string; args: string[]; cwd?: string; env?: Record<string, string>; secret?: { name: string }; files?: Record<string, string> }): string {
   const env = Object.entries(o.env ?? {}).map(([k, v]) => posix(`${k}=${v}`))
-  const run = `exec ${env.length ? `env ${env.join(' ')} ` : ''}${[o.bin, ...o.args].map(posix).join(' ')}`
-  const inner = `exec 2>&3 3>&-; ${o.secret ? secretPrelude(o.secret.name) : ''}${o.cwd ? `cd ${posix(o.cwd)} && ` : ''}${run}`
+  const files = Object.entries(o.files ?? {})
+  for (const [name] of files) if (!/^[\w.-]+$/.test(name)) throw new Error(`not a file name: ${name}`)
+  const write = files.length ? `__sy_files="$HOME/.cache/sessionary/launch" && mkdir -p "$__sy_files" && ${files.map(([n, c]) => `printf '%s' ${posix(c)} > "$__sy_files/${n}"`).join(' && ')} && ` : ''
+  const arg = (a: string) => posix(a).split(FILES).join(`'"$__sy_files"'`)
+  const run = `exec ${env.length ? `env ${env.join(' ')} ` : ''}${[posix(o.bin), ...o.args.map(arg)].join(' ')}`
+  const inner = `exec 2>&3 3>&-; ${o.secret ? secretPrelude(o.secret.name) : ''}${write}${o.cwd ? `cd ${posix(o.cwd)} && ` : ''}${run}`
   return `exec "\${SHELL:-/bin/sh}" -lic ${posix(inner)} 3>&2 2>/dev/null`
 }
 
@@ -342,9 +350,9 @@ const size = (z?: Partial<TermSize>) => ({ cols: Math.max(20, Math.min(500, Math
  * size is set before the shell starts (a later resize is not forwarded). With `run`, the agent's command runs in
  * a login shell so the node's PATH applies, in `cwd`; without it the person gets that shell.
  */
-export function sshTerminalSpec(t: SshTarget, o: { cwd?: string; run?: { bin: string; args: string[] }; size?: Partial<TermSize>; env?: Record<string, string>; secret?: { name: string; value: string }; tunnel?: Tunnel }): { bin: string; args: string[]; env?: Record<string, string> } {
+export function sshTerminalSpec(t: SshTarget, o: { cwd?: string; run?: { bin: string; args: string[] }; size?: Partial<TermSize>; env?: Record<string, string>; secret?: { name: string; value: string }; tunnel?: Tunnel; files?: Record<string, string> }): { bin: string; args: string[]; env?: Record<string, string> } {
   const { cols, rows } = size(o.size)
-  const start = o.run ? loginExec({ ...o.run, cwd: o.cwd, env: o.env, secret: o.secret }) : `${o.cwd ? `cd ${posix(o.cwd)} 2>/dev/null; ` : ''}exec "\${SHELL:-/bin/sh}" -l`
+  const start = o.run ? loginExec({ ...o.run, cwd: o.cwd, env: o.env, secret: o.secret, files: o.files }) : `${o.cwd ? `cd ${posix(o.cwd)} 2>/dev/null; ` : ''}exec "\${SHELL:-/bin/sh}" -l`
   const remote = `stty cols ${cols} rows ${rows} 2>/dev/null; ${start}`
   const secret = !!(o.secret && o.run)
   return {

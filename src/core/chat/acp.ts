@@ -79,7 +79,10 @@ export class AcpDriver implements ChatDriver {
       this.sessionId = res.sessionId
     }
     this.readOptions(res)
-    if (this.o.model && this.o.model !== this.modelState.id) await this.setModel(this.o.model).catch(() => {})
+    // a model asked for (a route, the page) is applied to this session, or the chat does not start on another one
+    if (this.o.model && this.o.model !== this.modelState.id) {
+      await this.setModel(this.o.model).catch((e) => { throw new ChatError(`${this.o.agent} could not switch this session to ${this.o.model}: ${(e as Error).message}`, 'failed') })
+    }
     if (this.o.mode && this.o.mode !== this.modeState.id) await this.setMode(this.o.mode).catch(() => {})
     this.emit({
       t: 'info',

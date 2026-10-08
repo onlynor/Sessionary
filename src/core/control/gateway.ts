@@ -23,6 +23,8 @@ export interface Plan { target: string; candidates: Candidate[]; skipped: { memb
 /** what the Routing and Gateway pages are told as it happens */
 export interface RouteEvent {
   id: string; at: number; agent: string; target: string; protocol: Protocol
+  /** the machine the request came from */
+  machine?: string
   phase: 'trying' | 'answering' | 'failed' | 'done' | 'refused'
   member?: string; status?: number; ms?: number; why?: string; input?: number; output?: number
 }
@@ -188,8 +190,14 @@ export interface GatewayOptions {
   /** how long to wait for an upstream's headers (a reply that does not stream comes all at once) */
   headersTimeoutMs?: number
   /** who a key belongs to, in place of the gateway key (a session's own door accepts only its own token) */
-  authorize?: (key: string, ua: string) => string | null
+  authorize?: (key: string, ua: string) => Caller | null
 }
+
+/**
+ * Who is asking: the agent and the machine it runs on (usage is recorded there), and for a session on a node the
+ * route it was started on, which serves a model the gateway does not know.
+ */
+export interface Caller { agent: string; machine: string; target?: string }
 
 /** compares two secrets in time that does not depend on where they differ */
 export function sameSecret(a: string, b: string): boolean {
@@ -227,7 +235,9 @@ export function createGateway(o: GatewayOptions) {
     const bearer = /^Bearer\s+(.+)$/i.exec(c.req.header('authorization') ?? '')?.[1]
     const key = (bearer ?? c.req.header('x-api-key') ?? c.req.header('x-goog-api-key') ?? '').trim()
     if (!key) return null
-    return o.authorize ? o.authorize(key, c.req.header('user-agent') ?? '') : callerOf(key, store.gatewayKey(), c.req.header('user-agent') ?? '')
+    if (o.authorize) return o.authorize(key, c.req.header('user-agent') ?? '')
+    const agent = callerOf(key, store.gatewayKey(), c.req.header('user-agent') ?? '')
+    return agent ? { agent, machine: 'local' } : null
   }
 
   gw.get('/v1/models', (c) => {
@@ -245,16 +255,18 @@ export function createGateway(o: GatewayOptions) {
     const path = new URL(c.req.url).pathname.replace(/^.*?(\/v1\/)/, '/v1/')
     const protocol = PATHS[path]
     if (!protocol) return c.json({ error: { message: `The gateway does not serve ${path}.` } }, 404)
-    const agent = auth(c)
-    if (!agent) return c.json(errorBody(protocol, 'Missing or wrong gateway key.', 'authentication_error'), 401)
+    const caller = auth(c)
+    if (!caller) return c.json(errorBody(protocol, 'Missing or wrong gateway key.', 'authentication_error'), 401)
     if (Number(c.req.header('content-length') ?? 0) > 64 << 20) return c.json(errorBody(protocol, 'Request too large.', 'invalid_request_error'), 413)
 
     let body: any
     try { body = JSON.parse(await c.req.text()) } catch { return c.json(errorBody(protocol, 'The request body is not JSON.', 'invalid_request_error'), 400) }
     const asked = typeof body?.model === 'string' ? body.model : ''
-    // a model the gateway does not know (an agent's built-in helper model, say) is served by the agent's binding
+    // a model the gateway does not know (an agent's built-in helper model, say) is served by the caller's own route:
+    // the one its session started on, else its machine's route for it
     const known = (t: string) => router.members(t).length > 0 && (t.startsWith('group/') || store.provider(t.slice(0, t.indexOf('/'))))
-    const target = asked && known(asked) ? asked : store.binding(agent)?.target ?? asked
+    const { agent, machine } = caller
+    const target = asked && known(asked) ? asked : caller.target ?? store.resolve(machine, agent, {}, (t) => router.plan(t, protocol).candidates.length > 0)?.target ?? asked
     const id = randomBytes(5).toString('hex')
     const t0 = Date.now()
     const plan = router.plan(target, protocol)
@@ -262,7 +274,7 @@ export function createGateway(o: GatewayOptions) {
       const why = !target ? 'The request names no model.'
         : plan.skipped.some((s) => s.why === 'protocol') ? `None of the models in ${target} speaks this protocol (${protocol}). Add one whose provider has a ${protocol} endpoint.`
         : plan.skipped.length ? `Every model in ${target} is switched off or has no key.` : `Sessionary does not know the model ${target}.`
-      emit({ id, at: t0, agent, target, protocol, phase: 'refused', why })
+      emit({ id, at: t0, machine, agent, target, protocol, phase: 'refused', why })
       return c.json(errorBody(protocol, why, 'not_found_error'), 404)
     }
 
@@ -273,7 +285,7 @@ export function createGateway(o: GatewayOptions) {
     for (const [i, cand] of plan.candidates.entries()) {
       const isLast = i === plan.candidates.length - 1
       tries++
-      emit({ id, at: Date.now(), agent, target, protocol, phase: 'trying', member: cand.member })
+      emit({ id, at: Date.now(), machine, agent, target, protocol, phase: 'trying', member: cand.member })
       const headers: Record<string, string> = { 'content-type': 'application/json', accept: c.req.header('accept') ?? (stream ? 'text/event-stream' : 'application/json') }
       const ua = c.req.header('user-agent'); if (ua) headers['user-agent'] = ua
       if (protocol === 'anthropic') {
@@ -295,7 +307,7 @@ export function createGateway(o: GatewayOptions) {
         if (c.req.raw.signal?.aborted) return new Response(null, { status: 499 })
         lastError = (e as Error).message
         const rest = router.failed(cand.member, 0)
-        emit({ id, at: Date.now(), agent, target, protocol, phase: 'failed', member: cand.member, status: 0, why: rest?.why ?? 'unreachable' })
+        emit({ id, at: Date.now(), machine, agent, target, protocol, phase: 'failed', member: cand.member, status: 0, why: rest?.why ?? 'unreachable' })
         if (isLast) break
         continue
       }
@@ -304,10 +316,10 @@ export function createGateway(o: GatewayOptions) {
       if (!res.ok) {
         router.end(cand.member)
         const rest = router.failed(cand.member, res.status, res.headers.get('retry-after'))
-        emit({ id, at: Date.now(), agent, target, protocol, phase: 'failed', member: cand.member, status: res.status, why: rest?.why ?? 'request-refused' })
+        emit({ id, at: Date.now(), machine, agent, target, protocol, phase: 'failed', member: cand.member, status: res.status, why: rest?.why ?? 'request-refused' })
         // the agent's own request was refused, or there is no one else: the upstream's answer goes back as it is
         if (!rest || isLast) {
-          store.addUsage({ at: t0, agent, target, provider: cand.provider.id, model: cand.model, protocol, status: res.status, ms: Date.now() - t0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, error: rest?.why ?? 'request-refused', tries })
+          store.addUsage({ at: t0, machine, agent, target, provider: cand.provider.id, model: cand.model, protocol, status: res.status, ms: Date.now() - t0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, error: rest?.why ?? 'request-refused', tries })
           return passBack(res)
         }
         lastFail = res
@@ -316,14 +328,14 @@ export function createGateway(o: GatewayOptions) {
       }
 
       router.answered(cand.member)
-      emit({ id, at: Date.now(), agent, target, protocol, phase: 'answering', member: cand.member, ms: Date.now() - t0 })
+      emit({ id, at: Date.now(), machine, agent, target, protocol, phase: 'answering', member: cand.member, ms: Date.now() - t0 })
       const sse = (res.headers.get('content-type') ?? '').includes('event-stream')
       const out = res.body ? tap(res.body, sse, (tk, error) => {
         router.end(cand.member)
         c.req.raw.signal?.removeEventListener('abort', onAbort)
         const ms = Date.now() - t0
-        if (path !== '/v1/messages/count_tokens') store.addUsage({ at: t0, agent, target, provider: cand.provider.id, model: cand.model, protocol, status: res.status, ms, input: tk.input, output: tk.output, cacheRead: tk.cacheRead, cacheWrite: tk.cacheWrite, error, tries })
-        emit({ id, at: Date.now(), agent, target, protocol, phase: 'done', member: cand.member, status: res.status, ms, input: tk.input, output: tk.output, ...(error && { why: error }) })
+        if (path !== '/v1/messages/count_tokens') store.addUsage({ at: t0, machine, agent, target, provider: cand.provider.id, model: cand.model, protocol, status: res.status, ms, input: tk.input, output: tk.output, cacheRead: tk.cacheRead, cacheWrite: tk.cacheWrite, error, tries })
+        emit({ id, at: Date.now(), machine, agent, target, protocol, phase: 'done', member: cand.member, status: res.status, ms, input: tk.input, output: tk.output, ...(error && { why: error }) })
       }) : (router.end(cand.member), null)
       const h = new Headers()
       for (const k of ['content-type', 'cache-control', 'request-id', 'x-request-id']) { const v = res.headers.get(k); if (v) h.set(k, v) }
@@ -332,7 +344,7 @@ export function createGateway(o: GatewayOptions) {
     }
 
     const last = plan.candidates.at(-1)!
-    store.addUsage({ at: t0, agent, target, provider: last.provider.id, model: last.model, protocol, status: lastFail?.status ?? 502, ms: Date.now() - t0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, error: lastError || 'unreachable', tries })
+    store.addUsage({ at: t0, machine, agent, target, provider: last.provider.id, model: last.model, protocol, status: lastFail?.status ?? 502, ms: Date.now() - t0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, error: lastError || 'unreachable', tries })
     return c.json(errorBody(protocol, `No model in ${target} could answer: ${lastError || 'unreachable'}`, 'api_error'), 502)
   })
 

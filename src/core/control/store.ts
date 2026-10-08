@@ -38,10 +38,22 @@ export interface Provider {
 
 export type RoutingMode = 'order' | 'rotate'
 export interface Group { id: string; name: string; mode: RoutingMode; members: string[]; on: boolean; at: number }
-export interface Binding { agent: string; target: string; at: number }
+/**
+ * Where a route applies. Routing belongs to the machine an agent runs on, never to the agent everywhere: `machine` ''
+ * is the default for every machine, `agent` '' every agent on that machine, `project` a working directory, `session`
+ * one session by its id (`agent:native id`). The most specific route wins (session > project > agent > machine > default).
+ */
+export interface RouteScope { machine: string; agent?: string; project?: string; session?: string }
+export interface Route extends Required<RouteScope> { target: string; at: number }
+/** which level a resolved route came from */
+export type RouteLevel = 'session' | 'project' | 'agent' | 'machine' | 'default'
+export const levelOf = (r: RouteScope): RouteLevel => (r.session ? 'session' : r.project ? 'project' : r.agent ? 'agent' : r.machine ? 'machine' : 'default')
 
 export interface UsageRow {
-  at: number; agent: string; target: string; provider: string; model: string; protocol: Protocol
+  at: number; agent: string; target: string
+  /** the machine the request came from (`local`, or a node's id) */
+  machine?: string
+  provider: string; model: string; protocol: Protocol
   status: number; ms: number; input: number; output: number; cacheRead: number; cacheWrite: number; error?: string; tries: number
 }
 
@@ -97,8 +109,11 @@ export class ControlStore {
         id text primary key, name text not null, mode text not null default 'order', members text not null default '[]',
         on_ integer not null default 1, at integer not null
       );
-      -- which agent is sent where when Sessionary starts it
-      create table if not exists bindings (agent text primary key, target text not null, at integer not null);
+      -- where an agent is sent when Sessionary starts it, per machine (see RouteScope; '' = any)
+      create table if not exists routes (
+        machine text not null, agent text not null default '', project text not null default '', session text not null default '',
+        target text not null, at integer not null, primary key (machine, agent, project, session)
+      );
       create table if not exists settings (k text primary key, v text not null);
       create table if not exists usage (
         at integer not null, agent text not null, target text not null, provider text not null, model text not null,
@@ -113,6 +128,13 @@ export class ControlStore {
     if (!cols.includes('cache_write')) {
       this.db.exec(`alter table usage add column cache_write integer not null default 0;
         update usage set input = max(0, input - cache_read) where protocol in ('chat', 'responses');`)
+    }
+    // before nodes could be routed, every request came from this computer
+    if (!cols.includes('machine')) this.db.exec(`alter table usage add column machine text not null default 'local'`)
+    // bindings were per agent on every machine; they become this computer's, where they were made and applied
+    if (this.db.prepare("select 1 from sqlite_master where type = 'table' and name = 'bindings'").get()) {
+      this.db.exec(`insert or ignore into routes (machine, agent, project, session, target, at) select 'local', agent, '', '', target, at from bindings;
+        drop table bindings;`)
     }
   }
 
@@ -139,7 +161,7 @@ export class ControlStore {
         const members = g.members.filter((m) => !m.startsWith(id + '/'))
         if (members.length !== g.members.length) this.saveGroup({ ...g, members })
       }
-      this.db.prepare("delete from bindings where target like ? escape '\\'").run(id.replace(/[%_\\]/g, '\\$&') + '/%')
+      this.db.prepare("delete from routes where target like ? escape '\\'").run(id.replace(/[%_\\]/g, '\\$&') + '/%')
       this.db.exec('commit')
     } catch (e) { this.db.exec('rollback'); throw e }
   }
@@ -157,17 +179,39 @@ export class ControlStore {
   }
   removeGroup(id: string) {
     this.db.prepare('delete from groups_ where id = ?').run(id)
-    this.db.prepare('delete from bindings where target = ?').run(`group/${id}`)
+    this.db.prepare('delete from routes where target = ?').run(`group/${id}`)
   }
 
-  // ---- bindings ----
-  bindings(): Binding[] { return (this.db.prepare('select * from bindings order by agent').all() as any[]).map((r) => ({ agent: r.agent, target: r.target, at: r.at })) }
-  binding(agent: string): Binding | undefined { return this.bindings().find((b) => b.agent === agent) }
-  /** an empty target unbinds: the agent starts on whatever its own configuration says */
-  bind(agent: string, target: string) {
-    if (!target) this.db.prepare('delete from bindings where agent = ?').run(agent)
-    else this.db.prepare('insert or replace into bindings (agent, target, at) values (?, ?, ?)').run(agent, target, Date.now())
+  // ---- routes ----
+  /** every route, or one machine's (its own, not the default it inherits) */
+  routes(machine?: string): Route[] {
+    const rows = (machine === undefined ? this.db.prepare('select * from routes order by machine, agent, project, session').all() : this.db.prepare('select * from routes where machine = ? order by agent, project, session').all(machine)) as any[]
+    return rows.map((r) => ({ machine: r.machine, agent: r.agent, project: r.project, session: r.session, target: r.target, at: r.at }))
   }
+  /** an empty target removes the route: that scope inherits again */
+  setRoute(scope: RouteScope, target: string) {
+    const k = [scope.machine, scope.agent ?? '', scope.project ?? '', scope.session ?? '']
+    if (!target) this.db.prepare('delete from routes where machine = ? and agent = ? and project = ? and session = ?').run(...k)
+    else this.db.prepare('insert or replace into routes (machine, agent, project, session, target, at) values (?, ?, ?, ?, ?, ?)').run(...k, target, Date.now())
+  }
+  /**
+   * The route for one agent on one machine, from the most specific scope down. `usable` skips a level whose target
+   * cannot serve this agent (no member speaks its protocol), so a broad default never breaks an agent it does not fit.
+   */
+  resolve(machine: string, agent: string, at: { project?: string; session?: string } = {}, usable: (target: string) => boolean = () => true): (Route & { level: RouteLevel }) | undefined {
+    const tries: RouteScope[] = [
+      ...(at.session ? [{ machine, agent, session: at.session }] : []),
+      ...(at.project ? [{ machine, agent, project: at.project }] : []),
+      { machine, agent }, { machine }, { machine: '' },
+    ]
+    for (const s of tries) {
+      const r = this.db.prepare('select * from routes where machine = ? and agent = ? and project = ? and session = ?').get(s.machine, s.agent ?? '', s.project ?? '', s.session ?? '') as any
+      if (r && usable(r.target)) return { machine: r.machine, agent: r.agent, project: r.project, session: r.session, target: r.target, at: r.at, level: levelOf(s) }
+    }
+    return undefined
+  }
+  /** a machine that is removed takes its routes with it */
+  dropMachine(machine: string) { if (machine) this.db.prepare('delete from routes where machine = ?').run(machine) }
 
   // ---- gateway ----
   private setting(k: string): string | undefined { return (this.db.prepare('select v from settings where k = ?').get(k) as any)?.v }
@@ -182,12 +226,12 @@ export class ControlStore {
 
   // ---- usage ----
   addUsage(u: UsageRow) {
-    this.db.prepare('insert into usage (at, agent, target, provider, model, protocol, status, ms, input, output, cache_read, cache_write, error, tries) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-      .run(u.at, u.agent, u.target, u.provider, u.model, u.protocol, u.status, u.ms, u.input, u.output, u.cacheRead, u.cacheWrite, u.error ?? null, u.tries)
+    this.db.prepare('insert into usage (at, machine, agent, target, provider, model, protocol, status, ms, input, output, cache_read, cache_write, error, tries) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(u.at, u.machine ?? 'local', u.agent, u.target, u.provider, u.model, u.protocol, u.status, u.ms, u.input, u.output, u.cacheRead, u.cacheWrite, u.error ?? null, u.tries)
   }
   usage(since = 0, limit = 5000): UsageRow[] {
     return (this.db.prepare('select * from usage where at >= ? order by at desc limit ?').all(since, limit) as any[]).map((r) => ({
-      at: r.at, agent: r.agent, target: r.target, provider: r.provider, model: r.model, protocol: r.protocol, status: r.status, ms: r.ms,
+      at: r.at, machine: r.machine, agent: r.agent, target: r.target, provider: r.provider, model: r.model, protocol: r.protocol, status: r.status, ms: r.ms,
       input: r.input, output: r.output, cacheRead: r.cache_read, cacheWrite: r.cache_write, tries: r.tries, ...(r.error != null && { error: r.error }),
     }))
   }
@@ -195,11 +239,11 @@ export class ControlStore {
   usageDays(since = ''): UsageDayRow[] {
     const from = since ? new Date(`${since}T00:00:00`).getTime() : 0
     return (this.db.prepare(`
-      select strftime('%Y-%m-%d', at / 1000, 'unixepoch', 'localtime') as day, agent, target, provider, model,
+      select strftime('%Y-%m-%d', at / 1000, 'unixepoch', 'localtime') as day, machine, agent, target, provider, model,
         count(*) as requests, sum(status >= 400 or error is not null) as failed, sum(input) as input, sum(output) as output,
         sum(cache_read) as cache_read, sum(cache_write) as cache_write
-      from usage where at >= ? group by day, agent, target, provider, model order by day`).all(from) as any[]).map((r) => ({
-      day: r.day, agent: r.agent, route: r.target, model: `${r.provider}/${r.model}`, requests: r.requests, failed: r.failed,
+      from usage where at >= ? group by day, machine, agent, target, provider, model order by day`).all(from) as any[]).map((r) => ({
+      day: r.day, machine: r.machine, agent: r.agent, route: r.target, model: `${r.provider}/${r.model}`, requests: r.requests, failed: r.failed,
       input: r.input, output: r.output, cacheRead: r.cache_read, cacheWrite: r.cache_write,
     }))
   }

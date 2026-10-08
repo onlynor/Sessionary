@@ -21,6 +21,8 @@ export interface UsageDay {
  */
 export interface UsageDayRow extends UsageDay {
   agent: string
+  /** the machine the usage happened on (`local` or a node's id): each machine's own record, only added up elsewhere */
+  machine?: string
   sessionId?: string
   /** the gateway's route (a model or `group/<id>`) */
   route?: string

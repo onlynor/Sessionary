@@ -100,7 +100,7 @@ export interface Proc {
   on(ev: 'error', f: (e: Error) => void): unknown
 }
 /** `tunnel`: on a node, a port there leading back here (ignored on this computer) */
-export interface SpawnSpec { bin: string; args: string[]; cwd?: string; env?: Record<string, string>; tunnel?: { remotePort: number; localPort: number }; secret?: { name: string; value: string } }
+export interface SpawnSpec { bin: string; args: string[]; cwd?: string; env?: Record<string, string>; tunnel?: { remotePort: number; localPort: number }; secret?: { name: string; value: string }; files?: Record<string, string> }
 export type Spawner = (spec: SpawnSpec) => Proc
 
 export class ChatError extends Error {

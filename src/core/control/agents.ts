@@ -23,7 +23,7 @@ export interface AgentModelState {
   via: Via
   /** the file this was read from */
   file?: string
-  /** how a binding reaches it when Sessionary starts it; 'manual' = only by the snippet on the Gateway page */
+  /** how a route reaches it when Sessionary starts it; 'manual' = only by the snippet on the Gateway page */
   launch: 'env' | 'manual'
   /** the agent's own setting that would win over what Sessionary starts it with */
   conflict?: string
@@ -31,7 +31,9 @@ export interface AgentModelState {
 
 /** the agents Model Control knows how to point at the gateway */
 export const ROUTABLE = ['claude-code', 'codex', 'opencode', 'pi', 'hermes'] as const
-export const LAUNCHABLE = new Set(['claude-code', 'codex', 'opencode'])
+// Hermes keeps the endpoint of its configured provider for a session (and saves it with the session), so a route
+// cannot reach it without editing its configuration: its model is chosen per session in the chat instead
+export const LAUNCHABLE = new Set(['claude-code', 'codex', 'opencode', 'pi'])
 
 const read = (f: string) => { try { return fs.readFileSync(f, 'utf8') } catch { return undefined } }
 const readJson = (f: string) => { const s = read(f); if (s == null) return undefined; try { return JSON.parse(stripJsonc(s)) } catch { return undefined } }
@@ -129,14 +131,38 @@ export function agentModelState(agent: string, roots: Roots = localRoots(), gate
 }
 
 /**
- * What a bound agent is started with. `secret` is the one value that grants use of the gateway: kept apart from `env`
+ * What a routed agent is started with. `secret` is the one value that grants use of the gateway: kept apart from `env`
  * so that on a node it can travel inside the SSH connection (SendEnv) instead of on a command line, where anyone on
  * the node could read it. On this computer it is simply part of the environment.
  *
- * `session` is for an agent that keeps the provider in the session itself: Codex resumes a thread on the provider it
- * was started with whatever `-c` says, so a chat has to name the routing again when it opens the thread.
+ * `session` is what a chat applies to the session itself once it is open: the model (and for Codex the provider —
+ * a resumed thread keeps the one it was started with whatever `-c` says).
+ * `files` are Sessionary's own helper files the agent loads (never the agent's configuration): written where the
+ * agent runs, under `FILES`, which `args` refer to.
  */
-export interface LaunchProfile { env: Record<string, string>; args: string[]; secret: { name: string; value: string }; session?: { provider: string; model: string } }
+export interface LaunchProfile {
+  env: Record<string, string>; args: string[]; secret: { name: string; value: string }
+  session?: { provider?: string; model: string }
+  files?: Record<string, string>
+}
+
+/** where a launch's `files` are, as `args` name it; replaced by a real directory on the machine that runs the agent */
+export const FILES = '{sessionary-files}'
+
+/**
+ * Pi takes a provider only from its own models.json or from an extension, so Sessionary brings an extension of its
+ * own: it registers the provider `sessionary` from the environment it is started with, for this run only.
+ */
+export const PI_EXTENSION = `// Sessionary: the gateway as a provider, for this run of Pi only (nothing is saved)
+export default function (pi) {
+  const id = process.env.SESSIONARY_MODEL
+  if (!id || !process.env.SESSIONARY_GATEWAY_URL) return
+  pi.registerProvider('sessionary', {
+    baseUrl: process.env.SESSIONARY_GATEWAY_URL, apiKey: '$SESSIONARY_GATEWAY_KEY', api: 'openai-completions',
+    models: [{ id, name: id, reasoning: false, input: ['text', 'image'], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 200000, maxTokens: 32000 }],
+  })
+}
+`
 
 /**
  * `gateway` is the gateway's base address (`http://127.0.0.1:4777/gateway`), `key` what opens it for this agent (the
@@ -179,6 +205,14 @@ export function launchProfile(agent: string, target: string, gateway: string, ke
         },
         args: [],
         secret: { name: 'SESSIONARY_GATEWAY_KEY', value: key },
+      }
+    case 'pi':
+      return {
+        env: { SESSIONARY_GATEWAY_URL: gateway + '/v1', SESSIONARY_MODEL: target },
+        args: ['-e', `${FILES}/pi-sessionary.mjs`],
+        secret: { name: 'SESSIONARY_GATEWAY_KEY', value: key },
+        files: { 'pi-sessionary.mjs': PI_EXTENSION },
+        session: { model: `sessionary/${target}` },
       }
   }
   return undefined

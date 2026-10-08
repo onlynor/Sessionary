@@ -177,7 +177,7 @@ src/core/context.ts    inspector data: current git state, working-tree diffs, fi
 src/core/runs.ts       "Continue here": one headless agent run per session, with collision checks
 src/core/launch.ts     terminal / editor / file-manager detection and detached launches
 src/core/control/      Model Control: store (control.db), presets, catalog (provider /models), gateway (routing, failover,
-                       usage), agents (what each agent runs on by itself; launch env/args for a bound agent), api (/api/control)
+                       usage), agents (what each agent runs on by itself; launch env/args for a routed agent), api (/api/control)
 src/server/app.ts      Hono API, server-sent events, static web assets
 web/                   Vite + React UI; web/src/styles.css holds the design tokens and themes, web/src/locales.ts the translations
 design/playground/     the static design playground the UI was developed from (`pnpm build:design`)
@@ -189,7 +189,7 @@ design/playground/     the static design playground the UI was developed from (`
 |---|---|---|
 | GET | `/api/agents` | Agents with session counts, storage path, availability, capabilities |
 | GET | `/api/sessions` | Session summaries (with project, `pinned`, `active`) |
-| GET | `/api/usage?since=` | Tokens per day, session and model from the agents' own records (each call on the day it was made) |
+| GET | `/api/usage?since=` · `/api/usage/machines?since=` | Tokens per day, session and model from the agents' own records (each call on the day it was made) · the same for every machine, each row marked with its machine (nodes not online are listed as missing) |
 | GET | `/api/sessions/:id?cursor=&limit=` | One session, paged by whole turns (`limit=all` for the rest) |
 | GET | `/api/sessions/:id/{outline,edits,context,tree,changes,changes/file,find,images/:ref,resume-command,run}` | Session details |
 | GET | `/api/search?q=` | Full-text search across sessions |
@@ -199,9 +199,9 @@ design/playground/     the static design playground the UI was developed from (`
 | POST | `/api/sessions/:id/{pin,unpin,hide,restore,open,continue,delete-from-disk}` | Session actions (`open` takes `target`: `folder`, `terminal`, `editor`, `file`, `resume`) |
 | POST | `/api/sessions/:id/messages/{hide,restore}` · `/api/runs/:id/stop` · `/api/removed/:id/{restore,purge}` | Messages, runs, backups |
 
-| GET | `/api/control/state` · `/api/control/usage/days?since=` | Providers (keys masked), groups, agents and their bindings, gateway, member health · gateway tokens per day, agent, route and model |
+| GET | `/api/control/state` · `/api/control/agents?machine=` · `/api/control/usage/days?since=` | Providers (keys masked), groups, routes, this computer's agents, gateway, member health · one machine's agents and the route each starts on · gateway tokens per day, machine, agent, route and model |
 | POST · PUT · DELETE | `/api/control/providers[/:id[/refresh]]` · `/api/control/groups[/:id]` | Providers (model list read on add/refresh) · routing groups |
-| POST | `/api/control/bindings` · `/api/control/gateway/{key,rotate}` · `/api/control/snippet` | Which model an agent starts on · the gateway key · set-up snippet |
+| POST | `/api/control/routes` · `/api/control/gateway/{key,rotate}` · `/api/control/snippet` | Which model agents start on, per machine (`machine` '' = every machine; then `agent`, `project` or `session`; empty `target` clears) · the gateway key · set-up snippet |
 | POST · GET | `/gateway/v1/{messages,chat/completions,responses}` · `/gateway/v1/models` | The gateway, for agents (gateway key, not the page token) |
 
 POST requests need the `x-sessionary-token` header from `GET /api/token`.

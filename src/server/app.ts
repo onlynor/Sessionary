@@ -32,6 +32,7 @@ import { loadSession, scan, type ScanReport } from '../core/scanner.ts'
 import { capabilities, commandLine, inside, LaunchError, openFolder, openInEditor, openTerminal } from '../core/launch.ts'
 import { watchSources, type WatchState } from '../core/watcher.ts'
 import { existsSync } from 'node:fs'
+import type { UsageDayRow } from '../core/usage.ts'
 
 const MAX_OUTPUT = 20_000
 
@@ -480,7 +481,8 @@ export function createApp(store: IndexStore, webRoot?: string, overlay: OverlayS
   app.put('/api/nodes/:id', async (c) => {
     try { const n = await nodes.update(c.req.param('id'), await c.req.json().catch(() => ({}))); probeCache.drop(c.req.param('id')); return c.json(n) } catch (e) { return nodeErr(c, e) }
   })
-  app.delete('/api/nodes/:id', (c) => { nodes.remove(c.req.param('id')); probeCache.drop(c.req.param('id')); return c.json({ ok: true }) })
+  // a node that is removed takes its routes with it (its usage history stays: it happened)
+  app.delete('/api/nodes/:id', (c) => { nodes.remove(c.req.param('id')); probeCache.drop(c.req.param('id')); opts.control?.dropMachine(c.req.param('id')); return c.json({ ok: true }) })
   app.post('/api/nodes/:id/connect', async (c) => {
     try { await nodes.connect(c.req.param('id')) } catch (e) { return nodeErr(c, e) }
     return c.json(nodes.list().find((n) => n.id === c.req.param('id')))
@@ -569,7 +571,30 @@ export function createApp(store: IndexStore, webRoot?: string, overlay: OverlayS
   }
   if (!opts.readOnly) {
     // ---- Model Control: providers, routing groups, which agent uses what, and the gateway agents are pointed at ----
-    const control = registerControl(app, { store: opts.control ?? new ControlStore(':memory:'), gatewayBase: () => `http://127.0.0.1:${opts.port ?? 4777}/gateway`, broadcast, sshNode: (id) => nodes.list().some((n) => n.id === id && n.kind === 'ssh') })
+    const control = registerControl(app, { store: opts.control ?? new ControlStore(':memory:'), gatewayBase: () => `http://127.0.0.1:${opts.port ?? 4777}/gateway`, broadcast,
+      sshNode: (id) => nodes.list().some((n) => n.id === id && n.kind === 'ssh'),
+      // routes are kept for the machines Sessionary starts agents on: this computer and the ssh nodes
+      machines: () => ['local', ...nodes.list().filter((n) => n.kind === 'ssh').map((n) => n.id)],
+    })
+    /**
+     * Usage across machines: each machine's own record (this computer's index, each node's through its own API),
+     * every row marked with where it happened. Nothing is copied: a node keeps its usage, this only adds it up.
+     * A node that is not online is listed in `missing`, not woken for this.
+     */
+    app.get('/api/usage/machines', async (c) => {
+      const since = /^\d{4}-\d{2}-\d{2}$/.test(c.req.query('since') ?? '') ? c.req.query('since')! : ''
+      const rows: (UsageDayRow & { machine: string })[] = store.usage(since).map((r) => ({ ...r, machine: 'local' }))
+      const missing: string[] = []
+      await Promise.all(nodes.list().map(async (n) => {
+        if (n.state !== 'online') { missing.push(n.id); return }
+        try {
+          const r = await nodes.forward(n.id, 'GET', '/api/usage', since ? `?since=${since}` : '', {})
+          if (!r.ok) throw new Error(String(r.status))
+          for (const x of (await r.json()) as UsageDayRow[]) rows.push({ ...x, machine: n.id })
+        } catch { missing.push(n.id) }
+      }))
+      return c.json({ rows, missing })
+    })
     app.get('/api/machines', (c) => c.json([
       { id: 'local', name: 'Localhost', kind: 'local', state: 'online', host: os.hostname(), platform: process.platform, at: 0 },
       ...nodes.list(),
@@ -646,14 +671,14 @@ export function createApp(store: IndexStore, webRoot?: string, overlay: OverlayS
       }
       // a bound agent started here goes through the gateway: its routing is added to how it is started; on a node
       // that includes a door of its own, which must close when the terminal's process ends (or never starts)
-      const extra = run && meta.agent ? await control.launchFor(meta.agent, machine) : undefined
+      const extra = run && meta.agent ? await control.launchFor(meta.agent, machine, { project: cwd, session: kind === 'resume' ? sessionId : undefined }) : undefined
       if (run && extra) run = { bin: run.bin, args: [...extra.args, ...run.args] }
       try {
         if (!node) {
           if (cwd && !existsSync(cwd)) cwd = undefined
           return terminals.create(meta, localTerminalSpec({ cwd: cwd ?? os.homedir(), run, size, env: extra?.env }))
         }
-        const spec = sshTerminalSpec(nodes.target(machine), { cwd, run, size, env: extra?.env, secret: extra?.secret, tunnel: extra?.tunnel })
+        const spec = sshTerminalSpec(nodes.target(machine), { cwd, run, size, env: extra?.env, secret: extra?.secret, tunnel: extra?.tunnel, files: extra?.files })
         return terminals.create(meta, ptyWrap(spec, size), extra?.release)
       } catch (e) { extra?.release?.(); throw e }
     }
@@ -710,7 +735,7 @@ export function createApp(store: IndexStore, webRoot?: string, overlay: OverlayS
     const chatLabel = (id: string) => localAdapters.find((a) => a.id === id)?.label ?? id
     const chats = new Chats({
       spawnFor: (machine) => (machine === 'local' ? localSpawner : sshSpawner(nodes.target(machine))),
-      launchFor: (agent, machine) => control.launchFor(agent, machine),
+      launchFor: (agent, machine, at) => control.launchFor(agent, machine, at),
       hooks: {
         changed: (ch, why) => {
           if (why === 'approval') notifier.emit({ type: 'agent', code: 'chat.approval', key: `chat-approval:${ch.id}`, machine: ch.machine, params: { agent: chatLabel(ch.agent), title: ch.title ?? ch.preview ?? '', machineName: nameOf(ch.machine), chat: ch.id, session: ch.sessionKey ?? '' } })

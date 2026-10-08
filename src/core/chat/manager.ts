@@ -98,7 +98,7 @@ export interface ChatsOptions {
   /** swap a driver for a test */
   driverFor?: (req: OpenRequest, emit: (e: ChatEvent) => void, spawner: Spawner) => ChatDriver | undefined
   /** what an agent is started with besides what its protocol needs: its model routing (control/agents.ts) */
-  launchFor?: (agent: ChatAgent, machine: string) => Promise<{ env: Record<string, string>; args: string[]; secret?: { name: string; value: string }; tunnel?: { remotePort: number; localPort: number }; session?: { provider: string; model: string }; release?: () => void } | undefined>
+  launchFor?: (agent: ChatAgent, machine: string, at: { project?: string; session?: string }) => Promise<{ env: Record<string, string>; args: string[]; secret?: { name: string; value: string }; tunnel?: { remotePort: number; localPort: number }; session?: { provider?: string; model: string }; files?: Record<string, string>; release?: () => void } | undefined>
   hooks?: ChatHooks
 }
 
@@ -181,13 +181,14 @@ export class Chats {
     // read fresh each time: the chat can be closed while its agent is still starting
     const isClosed = () => chat.state === 'closed'
     let extra: Awaited<ReturnType<NonNullable<ChatsOptions['launchFor']>>>
-    try { extra = await this.o.launchFor?.(req.agent, req.machine) } catch (e) { return this.failed(chat, (e as Error).message) }
+    // the route of this session on this machine: its own, else its project's, its agent's, its machine's, the default
+    try { extra = await this.o.launchFor?.(req.agent, req.machine, { project: req.cwd, session: req.sessionKey }) } catch (e) { return this.failed(chat, (e as Error).message) }
     if (isClosed()) { extra?.release?.(); return false } // closed while it was being prepared
     const base = this.o.spawnFor(req.machine)
     // the routing's arguments go first, so a model picked in the chat itself still has the last word; a node's door
     // closes when the process does, however it ends
     const spawner: Spawner = extra ? (s) => {
-      const p = base({ ...s, args: [...extra!.args, ...s.args], env: { ...s.env, ...extra!.env }, ...(extra!.secret && { secret: extra!.secret }), ...(extra!.tunnel && { tunnel: extra!.tunnel }) })
+      const p = base({ ...s, args: [...extra!.args, ...s.args], env: { ...s.env, ...extra!.env }, ...(extra!.secret && { secret: extra!.secret }), ...(extra!.tunnel && { tunnel: extra!.tunnel }), ...(extra!.files && { files: extra!.files }) })
       if (extra!.release) { p.on('close', extra!.release); p.on('error', extra!.release) }
       return p
     } : base
@@ -229,7 +230,7 @@ export class Chats {
     if (!chat.log.some((e) => e.t === 'note' && (e as { text: string }).text === text)) this.record(chat, { t: 'note', level: 'error', text })
   }
 
-  private makeDriver(req: OpenRequest, bin: string, emit: (e: ChatEvent) => void, spawner: Spawner, routed?: { provider: string; model: string }): ChatDriver {
+  private makeDriver(req: OpenRequest, bin: string, emit: (e: ChatEvent) => void, spawner: Spawner, routed?: { provider?: string; model: string }): ChatDriver {
     const common = { spawn: spawner, bin, cwd: req.cwd, resume: req.resume, model: req.model ?? routed?.model }
     switch (req.agent) {
       case 'claude-code': return new ClaudeDriver({ ...common, mode: req.mode }, emit)
