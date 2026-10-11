@@ -735,6 +735,9 @@ export function createApp(store: IndexStore, webRoot?: string, overlay: OverlayS
     const chatLabel = (id: string) => localAdapters.find((a) => a.id === id)?.label ?? id
     const chats = new Chats({
       spawnFor: (machine) => (machine === 'local' ? localSpawner : sshSpawner(nodes.target(machine))),
+      // an adapter whose `bin` is an absolute path resolved it itself (the resolver it shares with its probe);
+      // every other agent keeps the env-var/name lookup it always had
+      binFor: (agent) => { const bin = adapters.find((a) => a.id === agent)?.bin; return bin && path.isAbsolute(bin) ? bin : undefined },
       launchFor: (agent, machine, at) => control.launchFor(agent, machine, at),
       hooks: {
         changed: (ch, why) => {
@@ -759,7 +762,7 @@ export function createApp(store: IndexStore, webRoot?: string, overlay: OverlayS
         const row = store.get(sessionId)
         if (!row) throw new ChatError('Session not found.', 'failed')
         const cmd = resumeOf(sessionId)
-        return { agent: row.agent, cwd: row.summary.cwd, resume: cmd?.args.at(-1) ?? native, key: sessionId, title: overlay.titles().get(sessionId) ?? row.summary.title }
+        return { agent: row.agent, cwd: row.summary.cwd, resume: cmd?.args.at(-1) ?? native, key: sessionId, title: overlay.titles().get(sessionId) ?? row.summary.title, previousModel: row.summary.model }
       }
       const cmd = await nodes.resumeRaw(machine, sessionId).catch(() => undefined)
       // Pi is resumed by its id there: the path we know is inside our copy
@@ -779,17 +782,17 @@ export function createApp(store: IndexStore, webRoot?: string, overlay: OverlayS
         let agent = String(b.agent ?? ''), cwd: string | undefined = typeof b.cwd === 'string' && b.cwd.trim() && !b.cwd.startsWith('generic:') ? b.cwd.trim() : undefined
         // a folder typed as ~/…: this computer's home here; on a node, relative to where its login shell starts (home)
         if (cwd && /^~(\/|$)/.test(cwd)) cwd = machine === 'local' ? path.join(os.homedir(), cwd.slice(1)) : cwd.replace(/^~\/?/, '') || undefined
-        let resume: string | undefined, key: string | undefined, title: string | undefined
+        let resume: string | undefined, key: string | undefined, title: string | undefined, previousModel: string | undefined
         if (typeof b.sessionId === 'string' && b.sessionId) {
           const t = await chatTarget(machine, b.sessionId)
-          agent = t.agent; cwd = t.cwd || cwd; resume = t.resume; key = t.key; title = t.title
+          agent = t.agent; cwd = t.cwd || cwd; resume = t.resume; key = t.key; title = t.title; previousModel = 'previousModel' in t ? t.previousModel : undefined
         }
         if (!chatSupported(agent)) throw new ChatError(`${chatLabel(agent)} cannot be chatted with from Sessionary.`, 'unsupported')
         // a folder someone chose must be the one the agent runs in, never quietly another
         if (machine === 'local' && cwd && !existsSync(cwd)) throw new ChatError(resume ? 'The session’s working directory no longer exists, so the agent cannot resume it.' : 'That folder does not exist on this computer.', 'failed')
         if (machine === 'local' && !cwd) cwd = os.homedir()
         // returns at once: the agent comes up in the background (`warm`: asked for ahead of time, not by a person yet)
-        const ch = await chats.open({ agent, machine, cwd, resume, sessionKey: key, title, model: b.model, mode: b.mode, effort: b.effort }, { warm: b.warm === true })
+        const ch = await chats.open({ agent, machine, cwd, resume, sessionKey: key, title, model: b.model, mode: b.mode, effort: b.effort, previousModel }, { warm: b.warm === true })
         return c.json(ch)
       } catch (e) { return chatErr(c, e) }
     })

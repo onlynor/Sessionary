@@ -140,7 +140,7 @@ export function useChatFor(machine: string, agent: string, session: string) {
 }
 
 /** the agents whose own protocol Sessionary speaks, and where (this computer, or a node reached over ssh) */
-export const CHAT_AGENTS = ['claude-code', 'codex', 'opencode', 'pi', 'hermes']
+export const CHAT_AGENTS = ['claude-code', 'codex', 'opencode', 'pi', 'hermes', 'deepseek-harness']
 export const canChat = (agent: string, machineKind: 'local' | 'ssh' | 'url') => machineKind !== 'url' && CHAT_AGENTS.includes(agent)
 
 /**

@@ -65,7 +65,7 @@ function toItems(messages: Message[]): Item[] {
 /** Row actions, provided by the conversation so memoised rows don't need new props. */
 const Actions = createContext({ hideTurn: (_mi: number) => {}, hideMessage: (_mi: number) => {}, restore: (_ids: string[]) => {} })
 
-const NAMES: Record<string, string> = { 'claude-code': 'Claude Code', opencode: 'OpenCode', pi: 'Pi', hermes: 'Hermes', codex: 'Codex', workbuddy: 'WorkBuddy', 'workbuddy-ai': 'WorkBuddy AI' }
+const NAMES: Record<string, string> = { 'claude-code': 'Claude Code', opencode: 'OpenCode', pi: 'Pi', hermes: 'Hermes', codex: 'Codex', 'deepseek-harness': 'DeepSeek Harness', workbuddy: 'WorkBuddy', 'workbuddy-ai': 'WorkBuddy AI' }
 export const agentName = (id: string) => NAMES[id] ?? id
 
 const ItemView = memo(function ItemView({ it, agent }: { it: Item; agent: string }) {

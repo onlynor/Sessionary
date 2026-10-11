@@ -24,6 +24,9 @@ export function AgentIcon({ agent, size = 16 }: { agent: string; size?: number }
     case 'hermes':
       // the icon Nous Research publishes for Hermes Agent (its site's favicon)
       return <img {...common} src="/agents/hermes.png" alt="" style={{ width: size, height: size, borderRadius: '24%', objectFit: 'cover' }} />
+    case 'deepseek-harness':
+      // the mark DeepSeek Harness publishes for its Web UI (its site's favicon)
+      return <img {...common} src="/agents/deepseek-harness.svg" alt="" style={{ width: size, height: size }} />
     case 'workbuddy':
     case 'workbuddy-ai':
       // WorkBuddy's published logo; the international edition (WorkBuddy AI) carries a small globe so the two apps can be told apart

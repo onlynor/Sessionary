@@ -3,7 +3,7 @@
 [English](README.md) | [简体中文](README.zh-CN.md) | [繁體中文](README.zh-TW.md) | [日本語](README.ja.md)
 
 A local-first session manager for AI coding agents. Sessionary reads the history that **Claude Code**, **Codex**, **OpenCode**,
-**Pi**, **Hermes** and **WorkBuddy** (China edition and WorkBuddy AI) already keep on your disk, puts every session from every agent in one searchable list, and lets you pick any of
+**Pi**, **Hermes**, **DeepSeek Harness** and **WorkBuddy** (China edition and WorkBuddy AI) already keep on your disk, puts every session from every agent in one searchable list, and lets you pick any of
 them back up — in your own terminal with the agent's real resume command, or with one more prompt from the browser.
 
 Nothing leaves your machine: there is no account, no cloud service and no telemetry. The agents' files are read
@@ -126,6 +126,7 @@ Everything is optional; the defaults follow each agent's own conventions.
 | Pi | `~/.pi/agent/sessions/<cwd-encoded>/<ts>_<id>.jsonl` | JSONL tree (`id` / `parentId`) | Header carries `cwd`; tool results are separate `toolResult` messages; `bashExecution` for `!cmd` |
 | Codex | `~/.codex/sessions/YYYY/MM/DD/rollout-<ts>-<id>.jsonl` | JSONL (`session_meta`, `response_item`, `event_msg`) | Thread names from `~/.codex/state_N.sqlite` / `session_index.jsonl`; `apply_patch` calls become diffs |
 | Hermes | `~/.hermes/state.db` | SQLite (`sessions`, `messages`) | Rewound messages (`active = 0`) are skipped |
+| DeepSeek Harness | `<Sessionary data>/deepseek-harness/sessions/<cwd-encoded>/<id>/session.v<version>.jsonl[.zst]` | Zstandard-framed JSONL (`session`, `user/message`, `assistant/message`, `tool/call`, `tool/result`) | Read from Sessionary's own Harness home (`$DSH_HOME`), apart from the user's `~/.dsh`; the conversations themselves run on the harness's automation-only ACP server (`dsh --profile acp`) |
 | WorkBuddy | `~/.workbuddy/projects/<project>/<session>.jsonl` (China) · `~/.workbuddy-ai/…` (international) | JSONL, CodeBuddy-style items | Desktop apps: history only, no resume command; the format is undocumented, so unknown lines are skipped |
 
 The index stores only summaries and searchable text. Full conversations are re-parsed from the original files when you

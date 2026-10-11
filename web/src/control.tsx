@@ -49,7 +49,7 @@ export function ControlProvider({ children }: { children: React.ReactNode }) {
 }
 
 // ---------- names and marks ----------
-export const AGENT_NAME: Record<string, string> = { 'claude-code': 'Claude Code', codex: 'Codex', opencode: 'OpenCode', pi: 'Pi', hermes: 'Hermes' }
+export const AGENT_NAME: Record<string, string> = { 'claude-code': 'Claude Code', codex: 'Codex', opencode: 'OpenCode', pi: 'Pi', hermes: 'Hermes', 'deepseek-harness': 'DeepSeek Harness' }
 export const PROTOCOL_NAME: Record<Protocol, string> = { anthropic: 'Anthropic Messages', chat: 'OpenAI Chat', responses: 'OpenAI Responses' }
 
 /** A provider's mark: its initials on a tint of its own. No vendor logos are shipped. */

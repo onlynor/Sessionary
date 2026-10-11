@@ -30,10 +30,10 @@ export interface AgentModelState {
 }
 
 /** the agents Model Control knows how to point at the gateway */
-export const ROUTABLE = ['claude-code', 'codex', 'opencode', 'pi', 'hermes'] as const
+export const ROUTABLE = ['claude-code', 'codex', 'opencode', 'pi', 'hermes', 'deepseek-harness'] as const
 // Hermes keeps the endpoint of its configured provider for a session (and saves it with the session), so a route
 // cannot reach it without editing its configuration: its model is chosen per session in the chat instead
-export const LAUNCHABLE = new Set(['claude-code', 'codex', 'opencode', 'pi'])
+export const LAUNCHABLE = new Set(['claude-code', 'codex', 'opencode', 'pi', 'deepseek-harness'])
 
 const read = (f: string) => { try { return fs.readFileSync(f, 'utf8') } catch { return undefined } }
 const readJson = (f: string) => { const s = read(f); if (s == null) return undefined; try { return JSON.parse(stripJsonc(s)) } catch { return undefined } }
@@ -126,6 +126,9 @@ export function agentModelState(agent: string, roots: Roots = localRoots(), gate
       const endpoint = field('base_url')
       return { agent, model: inline ?? field('default'), provider: field('provider'), endpoint, via: viaOf(endpoint, gatewayBase), file: fs.existsSync(file) ? file : undefined, launch }
     }
+    // DeepSeek Harness reads its models from its own profile; a route reaches it through the patch Sessionary
+    // writes at launch (see `launchProfile`), never by editing the installation.
+    case 'deepseek-harness': return { agent, via: 'default', launch }
   }
   return { agent, via: 'default', launch: 'manual' }
 }
@@ -165,10 +168,46 @@ export default function (pi) {
 `
 
 /**
+ * DeepSeek Harness takes providers from its composed profile, so Sessionary writes a patch that mounts the gateway as
+ * the `sessionary` pi-ai route and points the ACP app at it; `--patch` applies it for this run only, and the
+ * installation's own files are never touched. The model id is a plain gateway target (`provider/model` or `group/id`),
+ * which the gateway resolves like any other agent's.
+ */
+export function harnessPatch(gateway: string, target: string, also: string[] = []): string {
+  const q = (s: string) => JSON.stringify(s)
+  const models = [...new Set([target, ...also])]
+  return `# Sessionary: the model gateway as DeepSeek Harness's only provider, for this launch only (nothing is saved)
+# the harness's own model routes are turned off, so Sessionary's Model Control is the only place a model is chosen
+- id: llm-deepseek
+  disabled: true
+- id: llm-deepseek-account
+  disabled: true
+- id: llm-pi-ai
+  config:
+    providers:
+      sessionary:
+        displayName: Sessionary
+        api: openai-completions
+        baseURL: ${q(gateway + '/v1')}
+        apiKeyEnv: SESSIONARY_GATEWAY_KEY
+        models:
+${models.map((m) => `          - id: ${q(m)}\n            name: ${q(m)}`).join('\n')}
+- id: acp
+  config:
+    provider: sessionary
+    model: ${q(target)}
+- id: agent-default-model
+  config:
+    provider: sessionary
+    model: ${q(target)}
+`
+}
+
+/**
  * `gateway` is the gateway's base address (`http://127.0.0.1:4777/gateway`), `key` what opens it for this agent (the
  * gateway key with the agent's id appended here; a session's own token on a node).
  */
-export function launchProfile(agent: string, target: string, gateway: string, key: string): LaunchProfile | undefined {
+export function launchProfile(agent: string, target: string, gateway: string, key: string, extra?: { models?: string[] }): LaunchProfile | undefined {
   switch (agent) {
     case 'claude-code':
       return {
@@ -214,6 +253,16 @@ export function launchProfile(agent: string, target: string, gateway: string, ke
         files: { 'pi-sessionary.mjs': PI_EXTENSION },
         session: { model: `sessionary/${target}` },
       }
+    case 'deepseek-harness':
+      return {
+        env: {},
+        args: ['--patch', `${FILES}/dsh-sessionary.yml`],
+        secret: { name: 'SESSIONARY_GATEWAY_KEY', value: key },
+        // `extra.models` carries a resumed session's own historical model so the harness can restore its log; the
+        // ACP driver then switches the session onto `target`, the route the person has chosen now
+        files: { 'dsh-sessionary.yml': harnessPatch(gateway, target, extra?.models) },
+        session: { model: JSON.stringify(['sessionary', target]) },
+      }
   }
   return undefined
 }
@@ -232,4 +281,4 @@ export function snippet(agent: string, target: string, gateway: string, key: str
 }
 
 /** the protocol the gateway must speak for an agent started with a binding */
-export const PROTOCOL_OF: Record<string, 'anthropic' | 'chat' | 'responses'> = { 'claude-code': 'anthropic', codex: 'responses', opencode: 'chat', pi: 'chat', hermes: 'chat' }
+export const PROTOCOL_OF: Record<string, 'anthropic' | 'chat' | 'responses'> = { 'claude-code': 'anthropic', codex: 'responses', opencode: 'chat', pi: 'chat', hermes: 'chat', 'deepseek-harness': 'chat' }

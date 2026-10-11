@@ -35,7 +35,7 @@ const DAY_RE = /^\d{4}-\d{2}-\d{2}$/
 export const tunnelPort = () => 20_000 + Math.floor(Math.random() * 30_000)
 
 /** where in a machine a session is: its project (working directory) and its session id (`agent:native id`) */
-export interface LaunchAt { project?: string; session?: string }
+export interface LaunchAt { project?: string; session?: string; /** a resumed session's own recorded model, for a safe recovery when the route has changed */ model?: string }
 
 /** how a routed agent is started: its profile, and on a node the tunnel and the door it leads to */
 export interface Launch extends LaunchProfile {
@@ -262,17 +262,25 @@ export function registerControl(app: Hono, o: ControlOptions) {
   const launchFor = async (agent: string, machine: string, at: LaunchAt = {}): Promise<Launch | undefined> => {
     const target = store.resolve(machine, agent, at, serves(agent))?.target
     if (!target) return undefined
+    // a session whose recorded model is no longer this route's must still resume: the profile carries that model
+    // so the agent can restore its log, and the ACP driver switches the session onto the current route next. The
+    // route's own members are offered too, so the harness's model picker can move the conversation between them.
+    const selectable = agent === 'deepseek-harness'
+      ? router.plan(target, PROTOCOL_OF[agent] ?? 'chat').candidates.map((c) => c.member)
+      : []
+    const models = [...new Set([...(at.model ? [at.model] : []), ...selectable])]
+    const extra = models.length ? { models } : undefined
     if (machine === 'local') {
-      const p = launchProfile(agent, target, o.gatewayBase(), `${store.gatewayKey()}.${agent}`)
+      const p = launchProfile(agent, target, o.gatewayBase(), `${store.gatewayKey()}.${agent}`, extra)
       if (!p) return undefined
       // here the key is just part of the environment the process is started with, and the files are written once
       const dir = p.files ? writeFiles(p.files) : ''
       return { ...p, env: { ...p.env, [p.secret.name]: p.secret.value }, args: p.args.map((a) => a.split(FILES).join(dir)) }
     }
-    if (!o.sshNode?.(machine) || !launchProfile(agent, target, '', '')) return undefined
+    if (!o.sshNode?.(machine) || !launchProfile(agent, target, '', '', extra)) return undefined
     const door = await openDoor({ agent, machine, target })
     const tunnel = { remotePort: (o.pickPort ?? tunnelPort)(), localPort: door.port }
-    const p = launchProfile(agent, target, `http://127.0.0.1:${tunnel.remotePort}/gateway`, door.token)!
+    const p = launchProfile(agent, target, `http://127.0.0.1:${tunnel.remotePort}/gateway`, door.token, extra)!
     return { ...p, tunnel, release: door.close }
   }
   return { router, launchFor, doors: () => doors.size, closeDoors: () => { for (const d of [...doors]) d.close() } }

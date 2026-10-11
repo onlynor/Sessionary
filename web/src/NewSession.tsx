@@ -4,6 +4,7 @@ import { AgentIcon } from './AgentIcon'
 import { chatApi } from './api'
 import { launchTerminal } from './actions'
 import { canChat } from './chat'
+import { AGENT_NAME } from './control'
 import { Icon } from './Icon'
 import { useInstalled, useMachine } from './machines'
 import { projectsOf } from './MachineTabs'
@@ -68,7 +69,7 @@ function NewSessionSheet({ agent: given, onClose, onStart, onTerminal }: {
 
   // the agents that can be started here: on PATH (once known) and able to create a session
   const startable = agents.filter((a) => a.canCreate && (!installed || installed.some((i) => i.id === a.id && i.installed)))
-  const label = agents.find((a) => a.id === agent)?.label ?? agent ?? ''
+  const label = agents.find((a) => a.id === agent)?.label ?? AGENT_NAME[agent ?? ''] ?? agent ?? ''
   // where this agent worked most recently first, then everything else this machine has seen
   const projects = useMemo(() => {
     const all = projectsOf(sessions).filter((r) => !r.missing && r.dir)

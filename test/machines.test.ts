@@ -152,7 +152,7 @@ test('machines: this computer first, then every node, each with a system report'
       assert.ok(there.cpus > 0 && Array.isArray(there.procs))
     }
     const agents = (await c.json('/api/machines/local/agents')).agents as any[]
-    assert.deepEqual(agents.map((a) => a.id).sort(), ['claude-code', 'codex', 'hermes', 'opencode', 'pi']) // desktop apps have no program to look for
+    assert.deepEqual(agents.map((a) => a.id).sort(), ['claude-code', 'codex', 'deepseek-harness', 'hermes', 'opencode', 'pi'])
   } finally { c.stopRuns() }
 })
 

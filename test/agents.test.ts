@@ -121,8 +121,9 @@ test('workbuddy: both editions are read from their own homes with the same parse
   assert.equal(cn.bin, '') // desktop apps: nothing to find on PATH
 })
 
-test('the registry knows every agent, and a node gets the same set', () => {
+test('the registry knows every agent, and a node gets the same set but for this computer\'s own harness', () => {
   const ids = adapters.map((a) => a.id)
-  assert.deepEqual(ids, ['claude-code', 'codex', 'opencode', 'pi', 'hermes', 'workbuddy', 'workbuddy-ai'])
-  assert.deepEqual(adaptersFor(roots).map((a) => a.id), ids)
+  assert.deepEqual(ids, ['claude-code', 'codex', 'opencode', 'pi', 'hermes', 'workbuddy', 'workbuddy-ai', 'deepseek-harness'])
+  // DeepSeek Harness runs on the computer Sessionary Desktop is on, so a node's mirror does not carry it
+  assert.deepEqual(adaptersFor(roots).map((a) => a.id), ids.filter((id) => id !== 'deepseek-harness'))
 })

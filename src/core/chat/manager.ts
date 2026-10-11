@@ -9,11 +9,11 @@ import {
 } from './types.ts'
 
 /** the agents that can be chatted with, and the protocol each one speaks */
-export const CHAT_AGENTS = ['claude-code', 'codex', 'opencode', 'pi', 'hermes'] as const
+export const CHAT_AGENTS = ['claude-code', 'codex', 'opencode', 'pi', 'hermes', 'deepseek-harness'] as const
 export type ChatAgent = (typeof CHAT_AGENTS)[number]
 export const chatSupported = (agent: string): agent is ChatAgent => (CHAT_AGENTS as readonly string[]).includes(agent)
 
-export const PROTOCOL: Record<ChatAgent, string> = { 'claude-code': 'stream-json', codex: 'app-server', opencode: 'ACP', pi: 'rpc', hermes: 'ACP' }
+export const PROTOCOL: Record<ChatAgent, string> = { 'claude-code': 'stream-json', codex: 'app-server', opencode: 'ACP', pi: 'rpc', hermes: 'ACP', 'deepseek-harness': 'ACP' }
 
 const LOG_MAX = Number(process.env.SESSIONARY_CHAT_LOG_MAX ?? 3000)
 const IDLE_MS = Number(process.env.SESSIONARY_CHAT_IDLE_MS ?? 30 * 60_000)
@@ -34,6 +34,8 @@ export interface OpenRequest {
   model?: string
   mode?: string
   effort?: string
+  /** a resumed session's own recorded model, so a route change does not make it unusable */
+  previousModel?: string
   title?: string
 }
 
@@ -93,20 +95,20 @@ export interface ChatHooks {
 export interface ChatsOptions {
   /** how to start a process for a machine ('local' runs it here, a node's id over ssh) */
   spawnFor: (machine: string) => Spawner
-  /** the program that is run for an agent on a machine */
-  binFor?: (agent: ChatAgent, machine: string) => string
+  /** the program that is run for an agent on a machine; an adapter that resolved an absolute program wins */
+  binFor?: (agent: ChatAgent, machine: string) => string | undefined
   /** swap a driver for a test */
   driverFor?: (req: OpenRequest, emit: (e: ChatEvent) => void, spawner: Spawner) => ChatDriver | undefined
   /** what an agent is started with besides what its protocol needs: its model routing (control/agents.ts) */
-  launchFor?: (agent: ChatAgent, machine: string, at: { project?: string; session?: string }) => Promise<{ env: Record<string, string>; args: string[]; secret?: { name: string; value: string }; tunnel?: { remotePort: number; localPort: number }; session?: { provider?: string; model: string }; files?: Record<string, string>; release?: () => void } | undefined>
+  launchFor?: (agent: ChatAgent, machine: string, at: { project?: string; session?: string; model?: string }) => Promise<{ env: Record<string, string>; args: string[]; secret?: { name: string; value: string }; tunnel?: { remotePort: number; localPort: number }; session?: { provider?: string; model: string }; files?: Record<string, string>; release?: () => void } | undefined>
   hooks?: ChatHooks
 }
 
 /** local processes; the environment is the person's own, with what the protocol needs added */
 export const localSpawner: Spawner = (s: SpawnSpec): Proc => spawn(s.bin, s.args, { cwd: s.cwd, env: { ...process.env, ...s.env, ...(s.secret && { [s.secret.name]: s.secret.value }) }, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true }) as unknown as Proc
 
-const DEFAULT_BIN: Record<ChatAgent, string> = { 'claude-code': 'claude', codex: 'codex', opencode: 'opencode', pi: 'pi', hermes: 'hermes' }
-const ENV_BIN: Record<ChatAgent, string> = { 'claude-code': 'SESSIONARY_CLAUDE_BIN', codex: 'SESSIONARY_CODEX_BIN', opencode: 'SESSIONARY_OPENCODE_BIN', pi: 'SESSIONARY_PI_BIN', hermes: 'SESSIONARY_HERMES_BIN' }
+const DEFAULT_BIN: Record<ChatAgent, string> = { 'claude-code': 'claude', codex: 'codex', opencode: 'opencode', pi: 'pi', hermes: 'hermes', 'deepseek-harness': 'dsh' }
+const ENV_BIN: Record<ChatAgent, string> = { 'claude-code': 'SESSIONARY_CLAUDE_BIN', codex: 'SESSIONARY_CODEX_BIN', opencode: 'SESSIONARY_OPENCODE_BIN', pi: 'SESSIONARY_PI_BIN', hermes: 'SESSIONARY_HERMES_BIN', 'deepseek-harness': 'SESSIONARY_DEEPSEEK_HARNESS_BIN' }
 export const localBin = (agent: ChatAgent) => process.env[ENV_BIN[agent]] ?? DEFAULT_BIN[agent]
 
 /**
@@ -182,7 +184,7 @@ export class Chats {
     const isClosed = () => chat.state === 'closed'
     let extra: Awaited<ReturnType<NonNullable<ChatsOptions['launchFor']>>>
     // the route of this session on this machine: its own, else its project's, its agent's, its machine's, the default
-    try { extra = await this.o.launchFor?.(req.agent, req.machine, { project: req.cwd, session: req.sessionKey }) } catch (e) { return this.failed(chat, (e as Error).message) }
+    try { extra = await this.o.launchFor?.(req.agent, req.machine, { project: req.cwd, session: req.sessionKey, model: req.previousModel }) } catch (e) { return this.failed(chat, (e as Error).message) }
     if (isClosed()) { extra?.release?.(); return false } // closed while it was being prepared
     const base = this.o.spawnFor(req.machine)
     // the routing's arguments go first, so a model picked in the chat itself still has the last word; a node's door
@@ -237,6 +239,8 @@ export class Chats {
       case 'codex': return new CodexDriver({ ...common, mode: req.mode, effort: req.effort, provider: routed?.provider }, emit)
       case 'opencode': return new AcpDriver({ ...common, agent: 'opencode', args: ['acp'], mode: req.mode }, emit)
       case 'hermes': return new AcpDriver({ ...common, agent: 'hermes', args: ['acp'], mode: req.mode }, emit)
+      // DeepSeek Harness boots an ordered profile of plugin bundles; `acp` is its automation-only stdio server
+      case 'deepseek-harness': return new AcpDriver({ ...common, agent: 'deepseek-harness', args: ['--profile', 'acp'], mode: req.mode }, emit)
       case 'pi': return new PiDriver({ ...common, effort: req.effort }, emit)
     }
   }

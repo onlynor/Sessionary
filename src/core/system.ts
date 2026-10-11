@@ -196,11 +196,13 @@ ${o.path ? `PATH=${q(o.path)}; export PATH
 K=${q(' ' + known + ' ')}
 T=""; if command -v timeout >/dev/null 2>&1; then T="timeout 5"; fi
 tmp=$(mktemp -d 2>/dev/null || echo "/tmp/sessionary.$$"); mkdir -p "$tmp"
+i=0
 for b in ${names.map((n) => q(n)).join(' ')}; do
+  i=$((i + 1))
   p=$(command -v "$b" 2>/dev/null) || continue
   k=$(stat -L -c '%Y:%s' "$p" 2>/dev/null || stat -L -f '%m:%z' "$p" 2>/dev/null)
-  case "$K" in *" $b=$p@$k "*) printf '%s\\t%s\\t%s\\t\\n' "$b" "$p" "$k" > "$tmp/$b"; continue;; esac
-  ( v=$($T "$b" --version 2>&1 </dev/null | head -n 1); printf '%s\\t%s\\t%s\\t%s\\n' "$b" "$p" "$k" "$v" > "$tmp/$b" ) &
+  case "$K" in *" $b=$p@$k "*) printf '%s\\t%s\\t%s\\t\\n' "$b" "$p" "$k" > "$tmp/$i"; continue;; esac
+  ( v=$($T "$b" --version 2>&1 </dev/null | head -n 1); printf '%s\\t%s\\t%s\\t%s\\n' "$b" "$p" "$k" "$v" > "$tmp/$i" ) &
 done
 wait
 cat "$tmp"/* 2>/dev/null
