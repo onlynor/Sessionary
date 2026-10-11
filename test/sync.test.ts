@@ -37,6 +37,7 @@ const jl = (...rows: unknown[]) => rows.map((r) => JSON.stringify(r)).join('\n')
 const claudeFile = path.join(remoteHome, '.claude', 'projects', '-srv-app', 'c1.jsonl')
 const piFile = path.join(remoteHome, '.pi', 'agent', 'sessions', '--srv-app--', '2026-01-01T00-00-00_p1.jsonl')
 const hermesDb = path.join(remoteHome, '.hermes', 'state.db')
+const harnessFile = path.join(remoteHome, '.dsh', 'sessions', '--srv-app--', 'h9', 'session.v4.jsonl')
 
 const claudeSession = (text: string) => jl(
   { type: 'user', uuid: 'u1', sessionId: 'c1', cwd: '/srv/app', gitBranch: 'main', timestamp: new Date().toISOString(), message: { role: 'user', content: text } },
@@ -78,7 +79,7 @@ const until = async (what: string, f: () => Promise<boolean>, ms = 15_000) => {
 test('the Hermes adapter reads sessions, tool calls and skips rewound messages', async () => {
   const root = path.join(tmp, 'h-only')
   seedHermes(path.join(root, 'state.db'))
-  const a = makeHermes(() => ({ claude: '', pi: '', xdgData: '', hermes: root, codex: '', workbuddy: '', workbuddyAi: '' }))
+  const a = makeHermes(() => ({ claude: '', pi: '', xdgData: '', hermes: root, codex: '', workbuddy: '', workbuddyAi: '', harness: '' }))
   const [src] = await a.listSources()
   assert.equal(src!.key, 'h1')
   const s = (await a.load(src!))!
@@ -105,6 +106,12 @@ test('an ssh node is mirrored over ssh and read in place, with nothing installed
     { id: 'e2', parentId: 'e1', type: 'message', timestamp: new Date().toISOString(), message: { role: 'assistant', content: [{ type: 'text', text: 'nothing unusual' }] } },
   ))
   seedHermes(hermesDb)
+  fs.mkdirSync(path.dirname(harnessFile), { recursive: true })
+  fs.writeFileSync(harnessFile, jl(
+    { type: 'session', version: 4, id: 'h9', createdAt: 1_700_000_000_000, cwd: '/srv/app', isSeeded: false, delegationDepth: 0 },
+    { type: 'user/message', seq: 1, time: 1_700_000_000_100, data: { role: 'user', id: 'u1', content: [{ type: 'text', text: 'run the harness on the node' }], source: { kind: 'user' } } },
+    { type: 'assistant/message', seq: 2, time: 1_700_000_001_000, data: { message: { role: 'assistant', id: 'a1', content: [{ type: 'text', text: 'done here' }], source: { kind: 'model', provider: 'sessionary', model: 'node-model' } }, usage: { inputTokens: 2, outputTokens: 1 } } },
+  ))
 
   const { req, json, stopRuns } = await controller()
   try {
@@ -114,9 +121,13 @@ test('an ssh node is mirrored over ssh and read in place, with nothing installed
     await until('the first copy', async () => (await json('/api/nodes')).find((n: any) => n.id === node.id)?.state === 'online')
 
     const list = await json(`/api/nodes/${node.id}/proxy/api/sessions`) as any[]
-    assert.deepEqual(list.map((s) => s.id).sort(), ['claude-code:c1', 'hermes:h1', 'pi:p1'])
+    assert.deepEqual(list.map((s) => s.id).sort(), ['claude-code:c1', 'deepseek-harness:h9', 'hermes:h1', 'pi:p1'])
+    // DeepSeek Harness is an ordinary agent on a node too: listed by its own API, with `dsh` on the node's PATH
+    const nodeAgents = await json(`/api/nodes/${node.id}/proxy/api/agents`) as any[]
+    assert.equal(nodeAgents.find((a) => a.id === 'deepseek-harness')?.bin, 'dsh')
+    assert.deepEqual(nodeAgents.find((a) => a.id === 'deepseek-harness')?.sessionCount, 1)
     const status = (await json('/api/nodes')).find((n: any) => n.id === node.id)
-    assert.equal(status.sync.files, 3) // one Claude transcript, one Pi transcript, the Hermes database
+    assert.equal(status.sync.files, 4) // one Claude transcript, one Pi transcript, the Hermes database, one Harness log
     assert.equal(status.sync.pending, 0)
     // a project name comes from the node's path, not from anything on this machine
     assert.equal(list.find((s) => s.id === 'claude-code:c1').project.name, 'app')
@@ -144,7 +155,7 @@ test('an ssh node is mirrored over ssh and read in place, with nothing installed
     fs.rmSync(piFile)
     assert.equal((await req(`/api/nodes/${node.id}/sync`, { method: 'POST' })).status, 200)
     const after = await json(`/api/nodes/${node.id}/proxy/api/sessions`) as any[]
-    assert.deepEqual(after.map((s) => s.id).sort(), ['claude-code:c1', 'hermes:h1'])
+    assert.deepEqual(after.map((s) => s.id).sort(), ['claude-code:c1', 'deepseek-harness:h9', 'hermes:h1'])
     const changed = await json(`/api/nodes/${node.id}/proxy/api/sessions/${encodeURIComponent('claude-code:c1')}`)
     assert.equal(changed.messages[0].blocks[0].text, 'deploy the app, then restart it')
 

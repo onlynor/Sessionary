@@ -17,6 +17,7 @@ const write = (dir: string, name: string, rows: unknown[]) => {
   fs.mkdirSync(dir, { recursive: true })
   fs.writeFileSync(path.join(dir, name), Buffer.concat(rows.map((r) => zlib.zstdCompressSync(Buffer.from(JSON.stringify(r) + '\n')))))
 }
+
 const sessionDir = path.join(process.env.DSH_HOME!, 'sessions', '--tmp-ws--', 'harness-1')
 write(sessionDir, 'session.v4.jsonl.zstd', [
   { type: 'session', version: 4, id: 'harness-1', createdAt: 1_700_000_000_000, cwd: '/tmp/ws', isSeeded: false, delegationDepth: 0 },
@@ -82,4 +83,30 @@ test('the adapter never writes to the harness storage', async () => {
   await Promise.all((await adapter.listSources()).map((s) => adapter.load(s)))
   const after = (await adapter.listSources()).map((s) => s.fingerprint).sort()
   assert.deepEqual(after, before)
+})
+
+test('a mirrored machine lists DeepSeek Harness, reading that node’s own home, with `dsh` as its program', async () => {
+  const { mirrorRoots } = await import('../src/core/util.ts')
+  const { adaptersFor } = await import('../src/adapters/index.ts')
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'sessionary-harness-node-'))
+
+  const node = adaptersFor(() => mirrorRoots(home)).find((a) => a.id === 'deepseek-harness')
+  assert.ok(node, 'a node lists DeepSeek Harness too, so its card is there even when nothing is installed')
+  assert.equal(node.bin, 'dsh') // the node's own program on PATH, never this computer's launcher
+  assert.equal(node.storage().path, path.join(home, '.dsh', 'sessions'))
+
+  const dir = path.join(home, '.dsh', 'sessions', '--srv-app--', 'node-1')
+  fs.mkdirSync(dir, { recursive: true })
+  const lines = [
+    { type: 'session', version: 4, id: 'node-1', createdAt: 1_700_000_000_000, cwd: '/srv/app' },
+    { type: 'user/message', seq: 1, time: 1_700_000_000_100, data: { role: 'user', id: 'u1', content: [{ type: 'text', text: 'hello from the node' }], source: { kind: 'user' } } },
+  ]
+  fs.writeFileSync(path.join(dir, 'session.v4.jsonl'), lines.map((l) => JSON.stringify(l) + '\n').join(''))
+
+  const [source] = await node.listSources()
+  assert.equal(source!.ref, path.join(dir, 'session.v4.jsonl'))
+  const summary = await node.summarize(source!)
+  assert.equal(summary?.id, 'deepseek-harness:node-1')
+  assert.equal(summary?.cwd, '/srv/app')
+  assert.equal(summary?.title, 'hello from the node')
 })

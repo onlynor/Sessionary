@@ -523,7 +523,10 @@ export function createApp(store: IndexStore, webRoot?: string, overlay: OverlayS
   })
 
   // ---- machines: this computer and every node, one list, one way to ask each what it is doing ----
-  const AGENT_NAMES = (): [string, string][] => localAdapters.filter((a) => a.bin).map((a) => [a.id, a.bin])
+  // The probe asks a machine about program names. This computer also resolves some agents itself (Harness's launcher,
+  // an absolute path), so it is asked about that path; a node is always asked about its own program on PATH.
+  const AGENT_NAMES = (id: string): [string, string][] =>
+    localAdapters.filter((a) => a.bin).map((a) => [a.id, id === 'local' || !path.isAbsolute(a.bin) ? a.bin : path.basename(a.bin)])
   const cached = <T,>(ttl: number) => { const m = new Map<string, { at: number; v: Promise<T> }>(); return (k: string, f: () => Promise<T>) => { const h = m.get(k); if (h && Date.now() - h.at < ttl) return h.v; const v = f(); m.set(k, { at: Date.now(), v }); v.catch(() => m.delete(k)); return v } }
   // What is installed on a machine rarely changes, but finding out costs a login shell and a few program starts, so
   // the answer is remembered on disk: asking returns the last answer at once and, when it is getting old, looks
@@ -538,7 +541,7 @@ export function createApp(store: IndexStore, webRoot?: string, overlay: OverlayS
     if (running) return running
     const prev = probeCache.get(id)
     const run = (async (): Promise<ProbeEntry> => {
-      const names = AGENT_NAMES()
+      const names = AGENT_NAMES(id)
       let entry: ProbeEntry
       if (id === 'local') {
         const r = await localAgents(names, prev?.known)
@@ -737,7 +740,7 @@ export function createApp(store: IndexStore, webRoot?: string, overlay: OverlayS
       spawnFor: (machine) => (machine === 'local' ? localSpawner : sshSpawner(nodes.target(machine))),
       // an adapter whose `bin` is an absolute path resolved it itself (the resolver it shares with its probe);
       // every other agent keeps the env-var/name lookup it always had
-      binFor: (agent) => { const bin = adapters.find((a) => a.id === agent)?.bin; return bin && path.isAbsolute(bin) ? bin : undefined },
+      binFor: (agent, machine) => { if (machine !== 'local') return undefined; const bin = adapters.find((a) => a.id === agent)?.bin; return bin && path.isAbsolute(bin) ? bin : undefined },
       launchFor: (agent, machine, at) => control.launchFor(agent, machine, at),
       hooks: {
         changed: (ch, why) => {

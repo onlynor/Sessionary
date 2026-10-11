@@ -9,6 +9,12 @@ export function dataHome(): string {
   return path.join(process.env.XDG_DATA_HOME ?? path.join(home(), '.local', 'share'), 'sessionary')
 }
 
+/**
+ * DeepSeek Harness's data directory for this computer: `DSH_HOME` when the environment names one, otherwise the
+ * directory Sessionary keeps its own Harness launches in (never the person's `~/.dsh`, whose config it does not touch).
+ */
+export const harnessHome = (): string => process.env.DSH_HOME ?? path.join(dataHome(), 'deepseek-harness')
+
 export function truncateTitle(s: string, n = 80): string {
   const one = s.replace(/\s+/g, ' ').trim()
   return one.length > n ? one.slice(0, n - 1) + '…' : one
@@ -31,7 +37,7 @@ export function* jsonlLines(text: string): Generator<any> {
 export const argSafe = (prompt: string) => (prompt.startsWith('-') ? ' ' + prompt : prompt)
 
 /** Where each agent keeps its history. A node's mirror has the same layout under its own directory. */
-export interface Roots { claude: string; pi: string; xdgData: string; hermes: string; codex: string; workbuddy: string; workbuddyAi: string }
+export interface Roots { claude: string; pi: string; xdgData: string; hermes: string; codex: string; workbuddy: string; workbuddyAi: string; harness: string }
 export const localRoots = (): Roots => ({
   claude: process.env.CLAUDE_CONFIG_DIR ?? path.join(home(), '.claude'),
   pi: process.env.PI_CODING_AGENT_DIR ?? path.join(home(), '.pi', 'agent'),
@@ -41,10 +47,12 @@ export const localRoots = (): Roots => ({
   // the China edition and the international edition (WorkBuddy AI) are separate apps with separate homes
   workbuddy: process.env.WORKBUDDY_HOME ?? path.join(home(), '.workbuddy'),
   workbuddyAi: process.env.WORKBUDDY_AI_HOME ?? path.join(home(), '.workbuddy-ai'),
+  harness: harnessHome(),
 })
 /** the layout of a machine's home directory, as mirrored from a node */
 export const mirrorRoots = (homeDir: string): Roots => ({
   claude: path.join(homeDir, '.claude'), pi: path.join(homeDir, '.pi', 'agent'),
   xdgData: path.join(homeDir, '.local', 'share'), hermes: path.join(homeDir, '.hermes'),
   codex: path.join(homeDir, '.codex'), workbuddy: path.join(homeDir, '.workbuddy'), workbuddyAi: path.join(homeDir, '.workbuddy-ai'),
+  harness: path.join(homeDir, '.dsh'),
 })

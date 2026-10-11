@@ -5,7 +5,7 @@ import zlib from 'node:zlib'
 import { cleanPrompt, derive, fallbackTitle, pickTitle } from '../core/derive.ts'
 import type { AgentAdapter, Block, Message, Session, Source, UsageEntry } from '../core/model.ts'
 import { totalsOf } from '../core/usage.ts'
-import { dataHome, home, toMs } from '../core/util.ts'
+import { dataHome, harnessHome, home, localRoots, toMs, type Roots } from '../core/util.ts'
 
 /**
  * DeepSeek Harness (`dsh`) as a Sessionary agent.
@@ -42,10 +42,8 @@ export interface HarnessInstall {
 /** the `dsh` launcher's name inside Sessionary's data directory */
 const LAUNCHER = 'dsh'
 
-/** The installation's data is isolated from the person's own `~/.dsh`, in Sessionary's directory. */
-function harnessHome(): string {
-  return process.env.DSH_HOME || path.join(dataHome(), 'deepseek-harness')
-}
+// This process's own Harness launches read the directory Sessionary keeps for them. A node's Harness data is read
+// through the `Roots` that node's adapters are given (see adaptersFor), never this computer's.
 if (!process.env.DSH_HOME) process.env.DSH_HOME = harnessHome()
 if (!process.env.DSH_AGENTS_HOME) process.env.DSH_AGENTS_HOME = path.join(harnessHome(), 'agents')
 if (!process.env.DSH_TELEMETRY_DISABLED) process.env.DSH_TELEMETRY_DISABLED = '1'
@@ -315,13 +313,14 @@ async function parse(source: Source): Promise<Session | null> {
   }
 }
 
-export const makeHarness = (): AgentAdapter => {
-  const root = () => path.join(harnessHome(), 'sessions')
+export const makeHarness = (roots: () => Roots = localRoots, bin: () => string = harnessBin): AgentAdapter => {
+  const root = () => path.join(roots().harness, 'sessions')
   return {
     id: 'deepseek-harness',
     label: 'DeepSeek Harness',
-    // the resolved launcher's absolute path, or `dsh` so the ordinary probe reports the ordinary missing state
-    bin: harnessBin(),
+    // this computer: the resolved launcher's absolute path, so the probe reports the installation really in use; a
+    // node: `dsh` on that node's PATH, the same program the node's own chat is started with
+    bin: bin(),
 
     async listSources() {
       const out: Source[] = []
@@ -354,8 +353,8 @@ export const makeHarness = (): AgentAdapter => {
     load: (source) => parse(source),
 
     storage() { return { path: root(), watch: [{ path: root(), recursive: true }] } },
-    newCommand(cwd) { return { bin: harnessBin(), args: ['--profile', 'tui'], cwd } },
-    resumeCommand(_source, session) { return { bin: harnessBin(), args: ['--profile', 'tui', '--resume', session.nativeId], cwd: session.cwd ?? '' } },
+    newCommand(cwd) { return { bin: bin(), args: ['--profile', 'tui'], cwd } },
+    resumeCommand(_source, session) { return { bin: bin(), args: ['--profile', 'tui', '--resume', session.nativeId], cwd: session.cwd ?? '' } },
   }
 }
 

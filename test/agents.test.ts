@@ -5,7 +5,7 @@ import path from 'node:path'
 import { test } from 'node:test'
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'sessionary-agents-'))
-const roots = () => ({ claude: '', pi: '', xdgData: '', hermes: '', codex: path.join(tmp, '.codex'), workbuddy: path.join(tmp, '.workbuddy'), workbuddyAi: path.join(tmp, '.workbuddy-ai') })
+const roots = () => ({ claude: '', pi: '', xdgData: '', hermes: '', codex: path.join(tmp, '.codex'), workbuddy: path.join(tmp, '.workbuddy'), workbuddyAi: path.join(tmp, '.workbuddy-ai'), harness: path.join(tmp, '.dsh') })
 
 const { makeCodex, } = await import('../src/adapters/codex.ts')
 const { commandText, patchDiff } = await import('../src/adapters/codex.ts')
@@ -121,9 +121,10 @@ test('workbuddy: both editions are read from their own homes with the same parse
   assert.equal(cn.bin, '') // desktop apps: nothing to find on PATH
 })
 
-test('the registry knows every agent, and a node gets the same set but for this computer\'s own harness', () => {
+test('the registry knows every agent, and a node gets the same set (DeepSeek Harness included)', () => {
   const ids = adapters.map((a) => a.id)
   assert.deepEqual(ids, ['claude-code', 'codex', 'opencode', 'pi', 'hermes', 'workbuddy', 'workbuddy-ai', 'deepseek-harness'])
-  // DeepSeek Harness runs on the computer Sessionary Desktop is on, so a node's mirror does not carry it
-  assert.deepEqual(adaptersFor(roots).map((a) => a.id), ids.filter((id) => id !== 'deepseek-harness'))
+  // a node carries every agent, DeepSeek Harness too: it is read from that node's own home and started with its own `dsh`
+  assert.deepEqual(adaptersFor(roots).map((a) => a.id), ids)
+  assert.equal(adaptersFor(roots).find((a) => a.id === 'deepseek-harness')!.bin, 'dsh')
 })

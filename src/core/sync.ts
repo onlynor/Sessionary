@@ -110,8 +110,8 @@ export async function closeSsh(bin: string, t: SshTarget) {
 const LIST = `cd "$HOME" 2>/dev/null || { echo "The node has no home directory." >&2; exit 3; }
 find . -maxdepth 0 -printf '' 2>/dev/null || { echo "GNU find is required on the node (find -printf)." >&2; exit 4; }
 command -v rsync >/dev/null 2>&1 && echo "#rsync"
-for d in .claude/projects .pi/agent/sessions .codex/sessions .workbuddy/projects .workbuddy-ai/projects; do
-  [ -d "$d" ] && find "$d" -type f \\( -name '*.jsonl' -o -name '*.meta.json' \\) -printf '%p\\t%s\\t%T@\\n'
+for d in .claude/projects .pi/agent/sessions .codex/sessions .workbuddy/projects .workbuddy-ai/projects .dsh/sessions; do
+  [ -d "$d" ] && find "$d" -type f \\( -name '*.jsonl' -o -name '*.jsonl.zst' -o -name '*.jsonl.zstd' -o -name '*.meta.json' \\) -printf '%p\\t%s\\t%T@\\n'
 done
 for d in .local/share/opencode .hermes .codex; do
   [ -d "$d" ] && find "$d" -maxdepth 1 -type f \\( -name 'opencode.db' -o -name 'opencode.db-wal' -o -name 'state.db' -o -name 'state.db-wal' -o -name 'state_[0-9]*.sqlite' -o -name 'state_[0-9]*.sqlite-wal' -o -name 'session_index.jsonl' \\) -printf '%p\\t%s\\t%T@\\n'

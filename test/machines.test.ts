@@ -153,6 +153,9 @@ test('machines: this computer first, then every node, each with a system report'
     }
     const agents = (await c.json('/api/machines/local/agents')).agents as any[]
     assert.deepEqual(agents.map((a) => a.id).sort(), ['claude-code', 'codex', 'deepseek-harness', 'hermes', 'opencode', 'pi'])
+    // a node names DeepSeek Harness too, so its card appears there even when the node has nothing installed
+    const there = (await c.json(`/api/machines/${node.id}/agents`)).agents as any[]
+    assert.ok(there.some((a) => a.id === 'deepseek-harness' && a.bin === 'dsh' && a.installed === false))
   } finally { c.stopRuns() }
 })
 
