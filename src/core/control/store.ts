@@ -260,3 +260,13 @@ export function validProviderId(id: string) { return ID_RE.test(id) }
 export function validEndpoint(url: string) {
   try { const u = new URL(url); return (u.protocol === 'https:' || u.protocol === 'http:') && !u.username && !u.password } catch { return false }
 }
+
+/**
+ * A base URL and the path appended to it, without ever doubling a suffix the address already carries: `…/v1` plus
+ * `/models`, and equally an address someone pasted with the full path already on it. Trailing slashes are ignored.
+ */
+export function joinUrl(base: string, suffix: string): string {
+  const b = base.replace(/\/+$/, '')
+  const s = suffix.startsWith('/') ? suffix : `/${suffix}`
+  return b.endsWith(s) ? b : b + s
+}

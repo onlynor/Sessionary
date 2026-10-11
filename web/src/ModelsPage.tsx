@@ -271,7 +271,7 @@ function AddProvider({ presets, onClose, onAdded }: { presets: CtlPreset[]; onCl
           </>
         ) : (
           <form onSubmit={(e) => { e.preventDefault(); submit() }}>
-            <div className="add-head"><button type="button" className="btn icon" onClick={() => setPreset(undefined)} aria-label={t('Back')}><Icon name="chev" size={14} /></button><ProviderMark provider={preset} size={32} /><h2>{preset.kind === 'custom' ? preset.name : preset.name}</h2></div>
+            <div className="add-head"><button type="button" className="btn icon" onClick={() => setPreset(undefined)} aria-label={t('Back')}><Icon name="chev" size={14} /></button><ProviderMark provider={preset} size={32} /><h2>{preset.name}</h2></div>
             {preset.kind === 'custom' && (
               <label className="form-row"><span>{t('Name')}</span><span className="field"><input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder={t('My relay')} /></span></label>
             )}

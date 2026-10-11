@@ -1388,6 +1388,10 @@ a { color: inherit; text-decoration: none; }
 [data-theme="paper"] .pmark { color: hsl(var(--h) 60% 34%); background: hsl(var(--h) 75% 93%); }
 .pmark.group { color: var(--accent); background: var(--accent-fill); box-shadow: none; }
 .pmark.ghost { color: var(--text-3); background: var(--fill); box-shadow: none; }
+/* the brand mark is a mask, so it takes the tile's own colour and follows the theme */
+.pmark-icon { width: 60%; height: 60%; background-color: currentColor;
+  -webkit-mask-image: var(--icon); -webkit-mask-repeat: no-repeat; -webkit-mask-position: center; -webkit-mask-size: contain;
+  mask-image: var(--icon); mask-repeat: no-repeat; mask-position: center; mask-size: contain; }
 .mstack { display: inline-flex; flex: none; width: 50px; }
 .mstack .pmark { box-shadow: 0 0 0 2px var(--bg-soft); }
 .mstack .pmark + .pmark { margin-left: -11px; }

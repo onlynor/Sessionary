@@ -41,8 +41,9 @@ read-only; Sessionary's own state lives in a separate folder.
   at once arrive as one, and a closed page is silent.
 - **Organise.** Pin sessions to the top. Hide sessions or individual messages (Sessionary-only Trash), or delete a session
   from the agent's storage with a backup that can be restored.
-- **Model Control.** Add the API keys you have (presets for Anthropic, OpenAI, DeepSeek, Kimi, GLM, Qwen, MiniMax,
-  OpenRouter, Ollama… or any OpenAI-/Anthropic-compatible URL); the model list is read from the provider. Put models from
+- **Model Control.** Add the API keys you have (presets for Anthropic, OpenAI, DeepSeek, Kimi, Zhipu GLM, Google
+  Gemini, xAI Grok and OpenRouter, plus Ollama and LM Studio on this computer, a Magpie gateway, and any OpenAI- or
+  Anthropic-compatible URL); the model list is read from the provider. Put models from
   several providers in a *routing group* and choose, per agent, the model or group it runs on. A local gateway
   (`http://127.0.0.1:<port>/gateway`) relays Anthropic Messages, OpenAI Chat and OpenAI Responses requests to a member
   that speaks the same protocol, and moves to the next one — before any of the reply is sent — when one is rate limited,

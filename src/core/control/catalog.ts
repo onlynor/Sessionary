@@ -1,4 +1,4 @@
-import { ControlError, type Provider, type ProviderModel, resolveKey } from './store.ts'
+import { ControlError, joinUrl, type Provider, type ProviderModel, resolveKey } from './store.ts'
 
 /**
  * A provider's models come from the provider itself (`GET …/models`), never from a list built into Sessionary.
@@ -31,8 +31,8 @@ export async function listModels(p: Provider): Promise<ProviderModel[]> {
   const key = resolveKey(p.key)
   const openai = p.endpoints.chat || p.endpoints.responses
   let body: any
-  if (openai) body = await getJson(openai.replace(/\/+$/, '') + '/models', key ? { authorization: `Bearer ${key}` } : {})
-  else if (p.endpoints.anthropic) body = await getJson(p.endpoints.anthropic.replace(/\/+$/, '') + '/v1/models?limit=1000', { ...(key && { 'x-api-key': key, authorization: `Bearer ${key}` }), 'anthropic-version': '2023-06-01' })
+  if (openai) body = await getJson(joinUrl(openai, '/models'), key ? { authorization: `Bearer ${key}` } : {})
+  else if (p.endpoints.anthropic) body = await getJson(joinUrl(p.endpoints.anthropic, '/v1/models') + '?limit=1000', { ...(key && { 'x-api-key': key, authorization: `Bearer ${key}` }), 'anthropic-version': '2023-06-01' })
   else throw new ControlError('This provider has no endpoint to ask for its models.')
   const rows: any[] = Array.isArray(body?.data) ? body.data : Array.isArray(body?.models) ? body.models : Array.isArray(body) ? body : []
   const seen = new Set<string>()

@@ -52,14 +52,17 @@ export function ControlProvider({ children }: { children: React.ReactNode }) {
 export const AGENT_NAME: Record<string, string> = { 'claude-code': 'Claude Code', codex: 'Codex', opencode: 'OpenCode', pi: 'Pi', hermes: 'Hermes', 'deepseek-harness': 'DeepSeek Harness' }
 export const PROTOCOL_NAME: Record<Protocol, string> = { anthropic: 'Anthropic Messages', chat: 'OpenAI Chat', responses: 'OpenAI Responses' }
 
-/** A provider's mark: its initials on a tint of its own. No vendor logos are shipped. */
-export function ProviderMark({ provider, presets, size = 28 }: { provider?: Pick<CtlProvider, 'name' | 'preset'> | Pick<CtlPreset, 'name' | 'hue'>; presets?: CtlPreset[]; size?: number }) {
+/** A provider's mark: its brand icon when the preset ships one, its monogram otherwise, on the preset's own tint. */
+export function ProviderMark({ provider, presets, size = 28 }: { provider?: Pick<CtlProvider, 'name' | 'preset'> | Pick<CtlPreset, 'name' | 'hue' | 'icon'>; presets?: CtlPreset[]; size?: number }) {
   const name = provider?.name ?? '?'
-  const hue = provider && 'hue' in provider ? provider.hue : presets?.find((p) => provider && 'preset' in provider && p.id === provider.preset)?.hue ?? hashHue(name)
+  const preset = provider && 'hue' in provider ? provider : presets?.find((p) => provider && 'preset' in provider && p.id === provider.preset)
+  const hue = preset?.hue ?? hashHue(name)
   const letters = name.replace(/[^\p{L}\p{N} ]/gu, '').split(/\s+/).filter(Boolean)
   const mono = (letters.length > 1 ? letters[0]![0]! + letters[1]![0]! : (letters[0] ?? '?').slice(0, 2)).toUpperCase()
   return (
-    <span className="pmark" style={{ width: size, height: size, fontSize: Math.round(size * (mono.length > 1 ? 0.36 : 0.44)), '--h': hue } as React.CSSProperties} aria-hidden="true">{mono}</span>
+    <span className="pmark" style={{ width: size, height: size, fontSize: Math.round(size * (mono.length > 1 ? 0.36 : 0.44)), '--h': hue } as React.CSSProperties} aria-hidden="true">
+      {preset?.icon ? <span className="pmark-icon" style={{ '--icon': `url(/providers/${preset.icon}.svg)` } as React.CSSProperties} /> : mono}
+    </span>
   )
 }
 const hashHue = (s: string) => [...s].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 7)

@@ -126,7 +126,7 @@ export interface CtlModel { id: string; name?: string; on: boolean; context?: nu
 /** a provider as the page sees it: `key` is masked, `hasKey` says whether one is set */
 export interface CtlProvider { id: string; name: string; preset: string; endpoints: Partial<Record<Protocol, string>>; key: string; hasKey: boolean; models: CtlModel[]; on: boolean; at: number; refreshedAt?: number }
 export interface CtlGroup { id: string; name: string; mode: 'order' | 'rotate'; members: string[]; on: boolean; at: number }
-export interface CtlPreset { id: string; name: string; kind: 'vendor' | 'local' | 'gateway' | 'custom'; endpoints: Partial<Record<Protocol, string>>; keyless?: boolean; console?: string; key?: string; hue: number }
+export interface CtlPreset { id: string; name: string; kind: 'vendor' | 'local' | 'gateway' | 'custom'; endpoints: Partial<Record<Protocol, string>>; icon?: string; keyless?: boolean; console?: string; key?: string; hue: number }
 export interface CtlAgent {
   agent: string; model?: string; provider?: string; endpoint?: string; via: 'default' | 'custom' | 'magpie' | 'sessionary'; file?: string
   launch: 'env' | 'manual'; conflict?: string; target?: string; protocol: Protocol; reachable?: number; members?: number

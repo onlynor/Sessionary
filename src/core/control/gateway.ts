@@ -1,6 +1,6 @@
 import { Hono, type Context } from 'hono'
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
-import { type ControlStore, type Protocol, type Provider, resolveKey } from './store.ts'
+import { type ControlStore, joinUrl, type Protocol, type Provider, resolveKey } from './store.ts'
 
 /**
  * The gateway: one local endpoint agents are pointed at. It speaks three protocols and relays each request, as is,
@@ -301,7 +301,7 @@ export function createGateway(o: GatewayOptions) {
       let res: Response
       router.start(cand.member)
       try {
-        res = await fetch(cand.base + SUFFIX[path], { method: 'POST', headers, body: JSON.stringify({ ...body, model: cand.model }), signal: ctl.signal })
+        res = await fetch(joinUrl(cand.base, SUFFIX[path]!), { method: 'POST', headers, body: JSON.stringify({ ...body, model: cand.model }), signal: ctl.signal })
       } catch (e) {
         clearTimeout(timer); router.end(cand.member)
         if (c.req.raw.signal?.aborted) return new Response(null, { status: 499 })
