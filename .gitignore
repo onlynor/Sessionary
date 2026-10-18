@@ -38,6 +38,6 @@ Thumbs.db
 # legacy
 clideck
 
-# local notes
-docs/
+# local notes (not published docs: docs/*.md referenced from the README stay tracked)
+docs/model-control.md
 CLAUDE.md

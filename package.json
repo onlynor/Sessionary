@@ -20,7 +20,7 @@
     "url": "https://github.com/onlynor/Sessionary/issues"
   },
   "type": "module",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "bin": {
     "sessionary": "dist/cli.js"
   },
@@ -28,7 +28,8 @@
     "dist",
     "web-dist",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md"
   ],
   "engines": {
     "node": ">=22.13"

@@ -1,69 +1,72 @@
 # Sessionary
 
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+
 [English](README.md) | [简体中文](README.zh-CN.md) | [繁體中文](README.zh-TW.md) | [日本語](README.ja.md)
 
-A local-first session manager for AI coding agents. Sessionary reads the history that **Claude Code**, **Codex**, **OpenCode**,
-**Pi**, **Hermes**, **DeepSeek Harness** and **WorkBuddy** (China edition and WorkBuddy AI) already keep on your disk, puts every session from every agent in one searchable list, and lets you pick any of
+**Sessionary** is an open-source, local-first control center for AI coding agents — Claude Code, Codex, OpenCode, Pi,
+Hermes, DeepSeek Harness and WorkBuddy (China edition and WorkBuddy AI). It reads the session history each agent
+already keeps on your disk, puts every session from every agent in one searchable list, and lets you pick any of
 them back up — in your own terminal with the agent's real resume command, or with one more prompt from the browser.
+A built-in model gateway lets you add provider API keys once and route which model each agent runs on, with
+per-agent, per-project and per-day token usage.
 
 Nothing leaves your machine: there is no account, no cloud service and no telemetry. The agents' files are read
-read-only; Sessionary's own state lives in a separate folder.
+read-only; Sessionary's own state lives in a separate folder. A companion project,
+[Sessionary Desktop](https://github.com/onlynor/Sessionary-Desktop), packages this same web client as a native
+Linux/macOS/Windows application.
 
 ## Features
 
-- **Machines first.** Everything is organised as machine → agent → project → session. Your computer is one machine; add a VPS
-  or any server you can SSH into and it gets the same pages: its agents (with versions), projects, sessions, an in-app
-  terminal, and a live monitor (CPU, memory, disk, running agents).
-- **One list for every agent.** Sessions from Claude Code, OpenCode and Pi, normalised into one model, shown per agent or
-  all together. Sort by last activity, start date, message count or title; group by date or project; narrow to pinned,
-  active or file-editing sessions; scope to one project (git root, worktrees folded together).
+Everything below is organised as **machine → agent → project → session**. Your computer is one machine; add a VPS
+or any server you can SSH into and it gets the same pages.
+
+- **One list for every agent.** Sessions from Claude Code, Codex, OpenCode, Pi, Hermes, DeepSeek Harness and
+  WorkBuddy, normalised into one model, shown per agent or all together. Sort by last activity, start date, message
+  count or title; group by date or project; narrow to pinned, active or file-editing sessions; scope to one project
+  (git root, worktrees folded together).
 - **Search everything.** The sidebar matches titles, projects, branches and previews as you type and, from two
-  characters on, the full text of every message (trigram index, so CJK and partial words match). `Ctrl K` searches all
-  sessions plus commands; `Ctrl F` finds inside the open conversation.
-- **Live.** File watchers on each agent's storage rescan within about a second of a write and push the change to open
-  pages, so new sessions appear and the conversation on screen follows an agent that is writing right now (*Active*).
+  characters on, the full text of every message (trigram index, so CJK and partial words match). `Ctrl K` searches
+  all sessions plus commands; `Ctrl F` finds inside the open conversation.
+- **Live.** File watchers on each agent's storage rescan within about a second of a write and push the change to
+  open pages, so new sessions appear and the conversation on screen follows an agent that is writing right now
+  (*Active*).
 - **Read a session properly.** Messages, folded tool-call steps with diffs and outputs, thinking, images, sub-agent
-  sessions, a prompt index, and a *Changes* view of every file the agent edited plus the live working tree.
-  The inspector shows the project, branch, uncommitted state, a file tree and the session's model, tokens and cost.
-- **Pick it back up.**
-  - *Resume in Terminal* opens your terminal in the session's directory running `claude --resume <id>`,
-    `opencode --session <id>` or `pi --session <file>`; *Copy resume command* gives you the same line.
-  - *Continue here* sends one more prompt through the agent's headless CLI and streams the reply in — read-only by
-    default.
-  - Open the session's folder, a terminal there, or the folder or any file of it in your editor.
-- **Other machines (nodes).** Add a VPS or any machine you can `ssh` into and browse, search and read its Claude Code,
-  OpenCode, Pi and Hermes sessions next to your own, and resume one in a terminal here through SSH. Nothing is installed
-  on the node: Sessionary copies the history files over SSH (`find` + `tar`) and reads the copy. Hosts come from your
-  `~/.ssh/config`; login must be key-based.
-- **Notifications, sparingly.** The bell and the sidebar badge what needs you: an agent running in an app terminal that has gone
-  quiet or exited, a node that stays unreachable, a large copy that finished. Desktop notifications (opt-in) only come when the
-  page is in the background; there are switches per kind and *Pause for 1 hour*, nothing repeats within a cooldown, several
-  at once arrive as one, and a closed page is silent.
-- **Organise.** Pin sessions to the top. Hide sessions or individual messages (Sessionary-only Trash), or delete a session
-  from the agent's storage with a backup that can be restored.
+  sessions, a prompt index, and a *Changes* view of every file the agent edited plus the live working tree. The
+  inspector shows the project, branch, uncommitted state, a file tree and the session's model, tokens and cost.
+- **Pick it back up.** *Resume in Terminal* opens your terminal in the session's directory running the agent's real
+  resume command (`claude --resume <id>`, `opencode --session <id>`, `pi --session <file>`); *Copy resume command*
+  gives you the same line. *Continue here* sends one more prompt through the agent's headless CLI and streams the
+  reply in — read-only by default. Or open the session's folder, a terminal there, or any file of it in your editor.
+- **Other machines (nodes).** Add a VPS or any machine you can `ssh` into and browse, search and read its agent
+  sessions next to your own, and resume one in a terminal here through SSH. Nothing is installed on the node:
+  Sessionary copies the history files over SSH and reads the copy. Hosts come from your `~/.ssh/config`; login must
+  be key-based.
 - **Model Control.** Add the API keys you have (presets for Anthropic, OpenAI, DeepSeek, Kimi, Zhipu GLM, Google
   Gemini, xAI Grok and OpenRouter, plus Ollama and LM Studio on this computer, a Magpie gateway, and any OpenAI- or
-  Anthropic-compatible URL); the model list is read from the provider. Put models from
-  several providers in a *routing group* and choose, per agent, the model or group it runs on. A local gateway
-  (`http://127.0.0.1:<port>/gateway`) relays Anthropic Messages, OpenAI Chat and OpenAI Responses requests to a member
-  that speaks the same protocol, and moves to the next one — before any of the reply is sent — when one is rate limited,
-  refuses its key or is down. The Routing page draws each decision live; Usage shows tokens per day, model, agent and
-  route, from the gateway or from the agents' own session files. A Magpie gateway on the same machine can be added as one
-  provider. Agents' configuration files are never edited: a choice applies to the sessions Sessionary starts (terminal and
-  chat), through their environment and arguments — on this computer and on SSH nodes, where the session's own SSH
-  connection carries a tunnel back to the gateway; *Set up by hand* gives a snippet for anything else.
-- **Desktop-class UI.** Collapsible, resizable panes, light/dark/graphite themes, comfortable or compact lists, keyboard
-  navigation, touch and narrow-window layouts, and English, 简体中文, 繁體中文 and 日本語.
+  Anthropic-compatible URL); the model list is read from the provider. Group models from several providers into a
+  *routing group* and choose, per agent, the model or group it runs on. A local gateway relays requests to a member
+  that speaks the same protocol and fails over — before any reply is sent — if one is rate limited, refuses its key
+  or is down. The Routing page shows each decision live; Usage shows tokens per day, model, agent and route. Agents'
+  own configuration files are never edited: a choice applies to the sessions Sessionary starts, on this computer and
+  on SSH nodes alike.
+- **Notifications, sparingly.** The bell and the sidebar badge what needs you: an agent running in an app terminal
+  that has gone quiet or exited, a node that stays unreachable, a large copy that finished. Desktop notifications
+  (opt-in) only come when the page is in the background, with switches per kind and *Pause for 1 hour*.
+- **Organise.** Pin sessions to the top. Hide sessions or individual messages (Sessionary-only Trash), or delete a
+  session from the agent's storage with a backup that can be restored.
+- **Desktop-class UI.** Collapsible, resizable panes, light/dark/graphite themes, comfortable or compact lists,
+  keyboard navigation, touch and narrow-window layouts, and English, 简体中文, 繁體中文 and 日本語.
 
-## Requirements
+Only what's implemented today is listed above. See [Known limitations](#known-limitations).
 
-- Node.js **22.13 or newer** (Sessionary uses the built-in `node:sqlite`; there are no native modules).
-- Linux, macOS or Windows.
-- The agents you want to browse. Resuming and continuing need their CLIs (`claude`, `opencode`, `pi`) on `PATH`.
+## Installation and getting started
 
-## Install and run
+Sessionary isn't published to npm yet; run it from a checkout.
 
-Sessionary is not published to npm yet. From a checkout:
+**Requirements:** Node.js **22.13 or newer** (Sessionary uses the built-in `node:sqlite`; there are no native
+modules), on Linux, macOS or Windows. You don't need any agent installed to browse sessions it already left on
+disk; resuming and continuing need that agent's CLI (`claude`, `opencode`, `pi`, …) on `PATH`.
 
 ```sh
 pnpm install
@@ -86,7 +89,19 @@ sessionary [--port 4777] [--host 127.0.0.1] [--no-open] [--no-watch]
 | `--no-open` | Don't open the browser on start |
 | `--no-watch` | Don't watch the agents' files; rescan once a minute instead |
 
-### Keyboard
+**First run:** start Sessionary and open the browser tab it launches. If you already use Claude Code, Codex,
+OpenCode, Pi, Hermes or WorkBuddy, their existing sessions appear immediately — nothing to import or configure. Pick
+a session to read it, or use *Resume in Terminal* / *Continue here* to pick up where it left off. Sessionary doesn't
+start brand-new agent sessions itself (see [Known limitations](#known-limitations)); start one normally with the
+agent's own CLI and it will show up here.
+
+## How to use
+
+**Navigation.** The sidebar has Home and Machines at the top, then a block for the selected machine (Agents,
+Projects, Sessions, Terminal, Monitor), then Model Control (Models, Routing, Gateway, Usage), and a footer with
+Trash, Nodes, Notifications and Settings.
+
+**Keyboard**
 
 | Keys | Action |
 |---|---|
@@ -103,9 +118,7 @@ sessionary [--port 4777] [--host 127.0.0.1] [--no-open] [--no-watch]
 | `Delete` (`Ctrl ⌫`) | Move the session to Sessionary's Trash |
 | `?` | Show all shortcuts |
 
-## Configuration
-
-Everything is optional; the defaults follow each agent's own conventions.
+**Configuration.** Everything is optional; the defaults follow each agent's own conventions.
 
 | Variable | Default | Purpose |
 |---|---|---|
@@ -118,120 +131,74 @@ Everything is optional; the defaults follow each agent's own conventions.
 | `SESSIONARY_CLAUDE_BIN`, `SESSIONARY_OPENCODE_BIN`, `SESSIONARY_PI_BIN` | `claude`, `opencode`, `pi` | Agent executables (on Windows, point these at the real executable rather than an npm `.cmd` shim) |
 | `SESSIONARY_ALLOW_HOST` | unset | Accept non-loopback `Host` headers (only for a deliberately exposed setup) |
 
-## Where the data comes from
+**Where your data comes from.** Claude Code, OpenCode, Pi, Codex, Hermes, DeepSeek Harness and WorkBuddy each keep
+their own on-disk session format; Sessionary reads them read-only and re-parses the original file whenever you open
+a session. Full per-agent paths and formats: [docs/DATA_FORMATS.md](docs/DATA_FORMATS.md).
 
-| Agent | Location | Format | Notes |
-|---|---|---|---|
-| Claude Code | `~/.claude/projects/<cwd-encoded>/<id>.jsonl` | JSONL event log | One assistant message is split over records sharing `message.id`; tool results are `user` records; `cwd` / `gitBranch` on every record; sub-agents in `<id>/subagents/agent-*.jsonl`; title from `ai-title` / `custom-title` |
-| OpenCode | `$XDG_DATA_HOME/opencode/opencode.db` | SQLite (WAL); `session` / `message` / `part` with JSON `data` | `session.directory` + `project.worktree`; `parent_id` for sub-agents; tool call and result are one `tool` part; edit parts carry a unified diff |
-| Pi | `~/.pi/agent/sessions/<cwd-encoded>/<ts>_<id>.jsonl` | JSONL tree (`id` / `parentId`) | Header carries `cwd`; tool results are separate `toolResult` messages; `bashExecution` for `!cmd` |
-| Codex | `~/.codex/sessions/YYYY/MM/DD/rollout-<ts>-<id>.jsonl` | JSONL (`session_meta`, `response_item`, `event_msg`) | Thread names from `~/.codex/state_N.sqlite` / `session_index.jsonl`; `apply_patch` calls become diffs |
-| Hermes | `~/.hermes/state.db` | SQLite (`sessions`, `messages`) | Rewound messages (`active = 0`) are skipped |
-| DeepSeek Harness | `<Sessionary data>/deepseek-harness/sessions/<cwd-encoded>/<id>/session.v<version>.jsonl[.zst]` | Zstandard-framed JSONL (`session`, `user/message`, `assistant/message`, `tool/call`, `tool/result`) | Read from Sessionary's own Harness home (`$DSH_HOME`), apart from the user's `~/.dsh`; the conversations themselves run on the harness's automation-only ACP server (`dsh --profile acp`) |
-| WorkBuddy | `~/.workbuddy/projects/<project>/<session>.jsonl` (China) · `~/.workbuddy-ai/…` (international) | JSONL, CodeBuddy-style items | Desktop apps: history only, no resume command; the format is undocumented, so unknown lines are skipped |
+**Model providers and routing.** Add a provider and its API key on the Models page, group models from different
+providers into a routing group on Routing, then pick which model or group each agent runs on. Usage breaks down
+token consumption by day, model, agent and route.
 
-The index stores only summaries and searchable text. Full conversations are re-parsed from the original files when you
-open them, so the agents' files stay the single source of truth.
+**Remote machines (nodes).** On the Nodes page, add a host from your `~/.ssh/config` (login must already work with
+a key, no password prompt). Sessionary reads that machine's agent sessions over SSH; nothing is installed on it.
 
-## Privacy and safety
+**Privacy and safety.** The server only binds to `127.0.0.1` and refuses non-loopback `Host`/`Origin` headers;
+agents' files are read-only except for the *Delete from disk* and *Continue here* actions you trigger yourself, both
+reversible or read-only by default. Full detail: [docs/SECURITY.md](docs/SECURITY.md).
 
-- **Local only.** The server binds to `127.0.0.1` and answers only requests addressed to a loopback host name, which
-  also blocks DNS-rebinding attacks. Binding to another interface exposes your session history; don't, unless you know
-  who can reach it.
-- **Write protection.** Every state-changing request needs a per-launch token that only same-origin pages can read,
-  plus a loopback `Origin`.
-- **Agents' files are read-only** — with two explicit exceptions you trigger yourself:
-  - *Delete from disk* moves Claude Code / Pi files (transcript, `<id>/`, `file-history/`, `session-env/`, `tasks/`,
-    `todos/`) into Sessionary's backup folder, and exports OpenCode sessions (`opencode export`) before
-    `opencode session delete`. Both can be restored from the Trash until you delete the backup. Sessions written to in
-    the last two minutes are refused as possibly running.
-  - *Continue here* runs the agent's own CLI, which appends to the same session: `claude -p --resume <id>`,
-    `opencode run -s <id>`, `pi --session <file> -p`. It is read-only by default (Claude `--permission-mode plan`,
-    OpenCode `--agent plan`, Pi `--tools read,grep,find,ls`); write access is opted into per message.
-- **What Sessionary writes** (all under `SESSIONARY_HOME`): `index.db` (a disposable, rebuildable index), `overlay.db`
-  (your pins, Trash and deletion records), `backup/`, and `control.db` (providers, API keys, routing groups, the gateway
-  key and gateway usage; created readable by you only, `0600`).
-- **The gateway** answers on the same loopback port, needs its own key (`Bearer` or `x-api-key`), refuses requests carrying
-  a non-loopback `Origin`, and never shows API keys to the page (they are masked; `env:NAME` reads a key from the
-  environment instead of storing it).
-- **On a node**, each session gets its own *door*: a loopback listener on this computer that serves the gateway and
-  nothing else, opened only by a token made for that session. The session's own SSH connection carries the tunnel
-  (`ssh -R`, a random port on the node's loopback, its own connection, `ExitOnForwardFailure`). The token travels inside
-  that connection (`SendEnv` of an `LC_*` variable, which sshd accepts by default), so it is never on a command line on
-  either machine; a node whose sshd refuses it does not start the agent. The gateway key never leaves this computer.
-  When the session ends — closed, cancelled, the agent crashing, SSH dropping, or failing to start — its door closes,
-  so a token read on the node is worth that session alone, while it runs. A taken port is retried once on another.
-- **Opening things** is confined to the session's own directory; resume and terminal commands run through your login
-  shell in that directory.
+## Troubleshooting
 
-## Architecture
+- **Resume / Continue here fails with "command not found".** The agent's CLI isn't on `PATH` for the process that
+  started Sessionary. Point `SESSIONARY_CLAUDE_BIN` / `SESSIONARY_OPENCODE_BIN` / `SESSIONARY_PI_BIN` at the real
+  executable, or launch Sessionary from a shell where the agent already works.
+- **On Windows, Continue here fails for an npm-installed agent.** npm installs `claude`/`opencode`/`pi` as `.cmd`
+  shims; set the matching `SESSIONARY_*_BIN` variable to the actual executable.
+- **A session doesn't show up.** Confirm the agent writes to the default location in
+  [docs/DATA_FORMATS.md](docs/DATA_FORMATS.md), or point the matching environment variable
+  (`CLAUDE_CONFIG_DIR`, `XDG_DATA_HOME`, `PI_CODING_AGENT_DIR`) at it, then use **Rescan now** or restart Sessionary.
+- **A node won't connect.** Test the exact host from `~/.ssh/config` by hand first: `ssh <alias> true` must succeed
+  without a password prompt. Password-based SSH login is not supported.
+- **A model change doesn't seem to apply.** Routing only affects sessions Sessionary itself starts or continues
+  (terminal and chat); it never edits an agent's own configuration files, so a session started outside Sessionary
+  keeps running on whatever that agent was already configured with.
+- **I started the app but see no "new session" button.** That's expected for now — see
+  [Known limitations](#known-limitations).
 
-```
-src/cli.ts             entry point: first scan, file watcher, periodic fallback scan, HTTP server
-src/core/model.ts      agent-neutral Session / Message / Block (text, thinking, tool, image, note) and the adapter contract
-src/adapters/*.ts      the only agent-specific code: listSources → load, storage(), resume/continue commands, removal
-src/core/scanner.ts    incremental scan by per-source fingerprint (size:mtime / time_updated); reports changed sessions
-src/core/watcher.ts    fs.watch on each agent's storage, debounced into rescans
-src/core/index-store   derived SQLite index: session summaries + FTS5 trigram full text (prose and tool targets)
-src/core/overlay.ts    the user's own data: pins, hidden sessions/messages, deletion records — never derived or rebuilt
-src/core/project.ts    project = git root of the session's cwd (worktrees fold onto the main repo), resolved live
-src/core/context.ts    inspector data: current git state, working-tree diffs, files and tools touched by the session
-src/core/runs.ts       "Continue here": one headless agent run per session, with collision checks
-src/core/launch.ts     terminal / editor / file-manager detection and detached launches
-src/core/control/      Model Control: store (control.db), presets, catalog (provider /models), gateway (routing, failover,
-                       usage), agents (what each agent runs on by itself; launch env/args for a routed agent), api (/api/control)
-src/server/app.ts      Hono API, server-sent events, static web assets
-web/                   Vite + React UI; web/src/styles.css holds the design tokens and themes, web/src/locales.ts the translations
-design/playground/     the static design playground the UI was developed from (`pnpm build:design`)
-```
+## Project structure and technical overview
 
-### HTTP API
+Sessionary is a single Node.js process: a scanner and file watcher keep a derived SQLite index of every agent's
+sessions current, a Hono server exposes it over HTTP and server-sent events, and a Vite/React UI (also embedded in
+[Sessionary Desktop](https://github.com/onlynor/Sessionary-Desktop)) serves as the page. Agent-specific code is
+isolated to one adapter per agent; everything else works on an agent-neutral session model.
 
-| Method | Path | Purpose |
-|---|---|---|
-| GET | `/api/agents` | Agents with session counts, storage path, availability, capabilities |
-| GET | `/api/sessions` | Session summaries (with project, `pinned`, `active`) |
-| GET | `/api/usage?since=` · `/api/usage/machines?since=` | Tokens per day, session and model from the agents' own records (each call on the day it was made) · the same for every machine, each row marked with its machine (nodes not online are listed as missing) |
-| GET | `/api/sessions/:id?cursor=&limit=` | One session, paged by whole turns (`limit=all` for the rest) |
-| GET | `/api/sessions/:id/{outline,edits,context,tree,changes,changes/file,find,images/:ref,resume-command,run}` | Session details |
-| GET | `/api/search?q=` | Full-text search across sessions |
-| GET | `/api/status` · `/api/events` | Scan / watch state and capabilities · server-sent `index`, `scan` events |
-| GET | `/api/trash` | Hidden sessions and messages, deleted-from-disk backups |
-| POST | `/api/scan` | Rescan now |
-| POST | `/api/sessions/:id/{pin,unpin,hide,restore,open,continue,delete-from-disk}` | Session actions (`open` takes `target`: `folder`, `terminal`, `editor`, `file`, `resume`) |
-| POST | `/api/sessions/:id/messages/{hide,restore}` · `/api/runs/:id/stop` · `/api/removed/:id/{restore,purge}` | Messages, runs, backups |
+Full source layout and the HTTP API: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-| GET | `/api/control/state` · `/api/control/agents?machine=` · `/api/control/usage/days?since=` | Providers (keys masked), groups, routes, this computer's agents, gateway, member health · one machine's agents and the route each starts on · gateway tokens per day, machine, agent, route and model |
-| POST · PUT · DELETE | `/api/control/providers[/:id[/refresh]]` · `/api/control/groups[/:id]` | Providers (model list read on add/refresh) · routing groups |
-| POST | `/api/control/routes` · `/api/control/gateway/{key,rotate}` · `/api/control/snippet` | Which model agents start on, per machine (`machine` '' = every machine; then `agent`, `project` or `session`; empty `target` clears) · the gateway key · set-up snippet |
-| POST · GET | `/gateway/v1/{messages,chat/completions,responses}` · `/gateway/v1/models` | The gateway, for agents (gateway key, not the page token) |
-
-POST requests need the `x-sessionary-token` header from `GET /api/token`.
-
-## Development
+## Development and contributing
 
 ```sh
 pnpm install
-pnpm dev:server      # API on :4777 (tsx watch, no browser)
-pnpm dev:web         # UI on :5173 with hot reload, proxies /api to :4777
+pnpm dev:server      # API on :4777
+pnpm dev:web         # UI on :5173 with hot reload
 pnpm typecheck
-pnpm test            # node:test suites in test/
-pnpm build           # dist/ (server) + web-dist/ (UI)
-pnpm build:design    # regenerate design/playground.html
+pnpm test
+pnpm build
 ```
 
-Point the agent variables (`CLAUDE_CONFIG_DIR`, `XDG_DATA_HOME`, `PI_CODING_AGENT_DIR`) and `SESSIONARY_HOME` at a
-temporary directory to develop against test data without touching your real history. Every UI string goes through
-`t()`; `test/i18n.test.ts` fails if a string lacks a translation.
+Issues and pull requests are welcome. Full development setup: [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
 
 ## Known limitations
 
-- Claude Code rewind forks are shown linearly; Pi shows only the active branch.
 - New sessions can't be started from Sessionary; existing ones are resumed or continued.
-- Terminal and editor launching is tested on Linux; macOS (Terminal.app) and Windows (Windows Terminal / cmd) support is
-  implemented but less exercised.
-- Windows npm-installed agent CLIs are `.cmd` shims; set `SESSIONARY_*_BIN` to the real executables for *Continue here*.
+- Claude Code rewind forks are shown linearly; Pi shows only the active branch.
+- Terminal and editor launching is tested on Linux; macOS (Terminal.app) and Windows (Windows Terminal / cmd)
+  support is implemented but less exercised.
+- Windows npm-installed agent CLIs are `.cmd` shims; set `SESSIONARY_*_BIN` to the real executables for
+  *Continue here*.
 
-## License
+## License and links
 
-[MIT](LICENSE)
+Sessionary is licensed under the [Apache License 2.0](LICENSE). Third-party licenses for the libraries it bundles
+are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+- [Sessionary Desktop](https://github.com/onlynor/Sessionary-Desktop) — this project packaged as a native app
+- [Issues](https://github.com/onlynor/Sessionary/issues)
